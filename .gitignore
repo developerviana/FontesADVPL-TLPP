@@ -1,0 +1,23 @@
+# Ignorar arquivos de sistema
+.DS_Store
+Thumbs.db
+
+# Ignorar diretórios de build
+/build/
+/dist/
+
+# Ignorar arquivos de configuração do sistema operacional
+*.swp
+*.swo
+*~
+
+# Ignorar arquivos de log
+*.log
+
+# Ignorar arquivos de dependências
+/node_modules/
+/venv/
+
+# Ignorar arquivos de IDEs e editores
+.idea/
+.vscode/

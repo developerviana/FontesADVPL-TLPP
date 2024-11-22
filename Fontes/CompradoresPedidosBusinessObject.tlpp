@@ -1,0 +1,112 @@
+#include "protheus.ch"
+#include "msobject.ch"
+#include "totvs.framework.treports.integratedprovider.th"
+
+namespace custom.compras.pedidos
+
+@totvsFrameworkTReportsIntegratedProvider(active=.T., team="SIGACOM", tables="SC7", name="Compradores x Pedidos", country="ALL", initialRelease="12.1.2210")
+class CompradoresPedidosBusinessObject from totvs.framework.treports.integratedprovider.IntegratedProvider
+    public method new() as object
+    public method getData(nPage as numeric, oFilter as object) as object
+    public method getSchema() as object
+
+    protected data aFields as array
+    protected data aStruct as array
+
+endclass
+
+//-------------------------------------------------------------------
+// Método de inicialização
+//-------------------------------------------------------------------
+method new() class CompradoresPedidosBusinessObject
+    _Super:new()
+    self:appendArea("VIANA")
+    self:setDisplayName(" VIANA Relatório Compradores x Pedidos")
+    self:setDescription(" VIANA Relatório que mostra os compradores e seus pedidos filtrados por data")
+
+    self:aFields := {"USR_NOME", "C7_FILIAL", "C7_NUM", "TOTAL_ITEMS", "C7_EMISSAO", "C7_PRODUTO", "B1_EMAX", "PP_INDICADOR"}
+    self:aStruct := u_getStruct(self:aFields)
+
+return self
+
+//-------------------------------------------------------------------
+// Método para obtenção de dados
+//-------------------------------------------------------------------
+method getData(nPage as numeric, oFilter as object) as object class CompradoresPedidosBusinessObject
+    local cQuery     as character
+    local cAlias     as character
+    local nCount     as numeric
+    local nX         as numeric
+    local jItems     as json
+    local jParams    as json
+    local oExec      as object
+    local lUseParams as logical
+
+    nCount := 0
+    jParams := oFilter:getParameters()
+    u_setDefaultParams(jParams)
+
+    cQuery := "SELECT USR.USR_NOME AS COMPRADOR, C7.C7_FILIAL, C7.C7_NUM, " + ;
+              "COUNT(C7.C7_ITEM) AS TOTAL_ITEMS, C7.C7_EMISSAO, C7.C7_PRODUTO, " + ;
+              "B1.B1_EMAX, CASE WHEN B1.B1_EMAX > 0 THEN 'S' ELSE 'N' END AS PP_INDICADOR " + ;
+              "FROM SC7020 C7 " + ;
+              "JOIN SB1020 B1 ON B1.B1_COD = C7.C7_PRODUTO AND B1.D_E_L_E_T_ <> '*' " + ;
+              "JOIN SYS_USR USR ON C7.C7_USER = USR.USR_ID AND USR.D_E_L_E_T_ <> '*' " + ;
+              "WHERE C7.D_E_L_E_T_ <> '*' AND C7.C7_EMISSAO BETWEEN ? AND ? " + ;
+              "GROUP BY USR.USR_NOME, C7.C7_FILIAL, C7.C7_NUM, C7.C7_EMISSAO, C7.C7_PRODUTO, B1.B1_EMAX " + ;
+              "ORDER BY USR.USR_NOME, C7.C7_EMISSAO"
+
+    oExec := FwExecStatement():New(cQuery)
+    oExec:setDate(1, StoD(jParams['01'][1]))
+    oExec:setDate(2, StoD(jParams['02'][1]))
+    cAlias := oExec:OpenAlias()
+
+    // Iteração e coleta dos dados
+    if ValType(cAlias) == "C"
+        while !(cAlias)->(Eof())
+            jItems := JsonObject():new()
+            for nX := 1 To Len(self:aStruct)
+                jItems[self:aStruct[nX][1]] := (cAlias)->&(self:aStruct[nX][5])
+            next nX
+
+            self:oData:appendData(jItems)
+            (cAlias)->(dbSkip())
+            nCount++
+
+            if nCount >= self:getPageSize()
+                exit
+            endif
+        enddo
+
+        self:setHasNext(!(cAlias)->(Eof()))
+        (cAlias)->(DBCloseArea())
+    endif
+
+return self:oData
+
+//-------------------------------------------------------------------
+// Método para definição do esquema de dados
+//-------------------------------------------------------------------
+method getSchema() as object class CompradoresPedidosBusinessObject
+    local nX as numeric
+
+    for nX := 1 To Len(self:aStruct)
+        self:addProperty(self:aStruct[nX][1], self:aStruct[nX][2], self:aStruct[nX][3], self:aStruct[nX][4], self:aStruct[nX][5])
+    next nX
+
+    self:addParameter("01", "Data de Início", "date", .F.)
+    self:addParameter("02", "Data de Fim", "date", .F.)
+
+return self:oSchema
+
+//-------------------------------------------------------------------
+// Função para definir parâmetros padrão
+//-------------------------------------------------------------------
+user function u_setDefaultParams(jParams)
+    if empty(jParams['01'][1])
+        jParams['01'][1] := totvs.framework.treports.date.dateToTimeStamp(Date())
+    endif
+    if empty(jParams['02'][1])
+        jParams['02'][1] := totvs.framework.treports.date.dateToTimeStamp(Date())
+    endif
+return

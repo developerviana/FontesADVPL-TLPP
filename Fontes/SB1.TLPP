@@ -1,0 +1,51 @@
+#include "msobject.ch"
+#include "totvs.framework.treports.integratedprovider.th"
+ 
+namespace totvs.protheus.rh.treportsintegratedprovider
+  
+@totvsFrameworkTReportsIntegratedProvider(active=.T.)
+class SRA2TReportsBusinessObject from totvs.framework.treports.integratedprovider.IntegratedProvider
+    public method new() as object
+    public method getAreas() as array
+    public method getDescription() as character
+    public method getData() as object
+    public method getSchema() as object
+endclass
+  
+method new() as object class SRA2TReportsBusinessObject
+    _Super:new()
+    self:setDisplayName("Funcionários")
+return self
+  
+method getDescription() as character class SRA2TReportsBusinessObject
+return "Funcionários"
+  
+method getAreas() as array class SRA2TReportsBusinessObject
+return {"RH"}
+  
+method getData(nPage as numeric, oFilter as object) as object class SRA2TReportsBusinessObject
+local cQuery as character  
+local jParams as json
+local cWhere as character
+ 
+jParams := oFilter:getParameters() //metodo para retorno do json dos parâmetros
+ 
+cWhere := " D_E_L_E_T_ = ' '"
+ 
+cQuery := "SELECT #QueryFields# FROM " + RetSQLName("SRA") +  " WHERE #QueryWhere#"
+ 
+//Define a quantidade máxima por página (Default 100)
+self:setPageSize(500)
+//Define a query do Objeto de Negócio
+self:setQuery(cQuery)
+//Define o campo de ordenação da query
+self:setOrder("RA_MAT")
+ 
+//Define o where da query
+self:setWhere(cWhere)
+return self:oData
+  
+method getSchema() as object class SRA2TReportsBusinessObject
+    self:aliasToSchema("SRA" , {"RA_NOME", "RA_FILIAL", "RA_MAT", "RA_EMAIL", "RA_ADMISSA"})
+    self:addParameter("logico","logico","boolean", .F.) //Adicionando o parâmetro manual
+return self:oSchema

@@ -1,3 +1,4 @@
 {
-    "totvsLanguageServer.editor.linter.includes": "W:\\Workspace\\victor.viana\\kttotvs\\INCLUDE"
+    "totvsLanguageServer.editor.linter.includes": "W:\\Workspace\\victor.viana\\kttotvs\\INCLUDE;",
+    "totvsLanguageServer.welcomePage": false
 }

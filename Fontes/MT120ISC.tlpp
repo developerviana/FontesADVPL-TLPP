@@ -1,14 +1,17 @@
 User Function MT120ISC()
+
  // Pegando a posição dos campos da SC7
  Local nPosNomeCC := aScan(aHeader, {|x| Trim(x[2]) == "C7_XNOMCC"})
  Local nPosNItem  := aScan(aHeader, {|x| Trim(x[2]) == "C7_NOMITEM"})
  Local nPosNCLava := aScan(aHeader, {|x| Trim(x[2]) == "C7_XNOMCLA"})
  Local nPosXclPCO := aScan(aHeader, {|x| Trim(x[2]) == "C7_XCLPCO"})
  Local nPosXopPCO := aScan(aHeader, {|x| Trim(x[2]) == "C7_XOPPCO"})
+ 
  // Adicionando as informações nos campos da tabela SC7
  ACOLS[n, nPosNomeCC] := Alltrim(SC1->C1_XCCNOME)
  ACOLS[n, nPosNItem]  := Alltrim(SC1->C1_XNITEM)
  ACOLS[n, nPosNCLava] := Alltrim(SC1->C1_XNCLAVA)
  ACOLS[n, nPosXopPCO] := Alltrim(SC1->C1_XOPPCO)
  ACOLS[n, nPosXclPCO] := Alltrim(SC1->C1_XCLPCO)
+
 Return .T.

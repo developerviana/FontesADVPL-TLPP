@@ -1,0 +1,501 @@
+#Include "TOTVS.ch"
+#Include 'Protheus.ch'
+#Include 'FWBrowse.ch'
+#Include 'TbiConn.ch'
+#Include 'RWMAKE.ch'
+#Include 'topconn.ch'
+#include 'parmtype.ch'
+
+// Opcoes do MessageBox
+#define MB_OK                       0
+#define MB_OKCANCEL                 1
+#define MB_YESNO                    4
+#define MB_ICONHAND                 16
+#define MB_ICONQUESTION             32
+#define MB_ICONEXCLAMATION          48
+#define MB_ICONASTERISK             64
+
+// Retornos possiveis do MessageBox
+#define IDOK			    1
+#define IDCANCEL		    2
+#define IDYES			    6
+#define IDNO			    7
+
+#define CONTAS_OS_OBRIGATORIA   { "512801100", "512801200", "512801300", "512801400", "512801500", "512802100", "512802200", "512802300", "512802400", "512802401", "512802500", "512803100", "512803200", "512803200", "512804100", "512804200", "512804300"}
+
+
+
+/*/{Protheus.doc} ValidaInclusaoSA
+// Rotinas de validaes de Solicitaes de Armazem
+@author Silfar Castro
+@since 26/03/2021
+/*/
+class OXSolicitacaoArmazem
+	static method ValidaInclusaoSA()
+	static method ValidaLiberacaoSA()
+	static method MensagemLiberacaoSA()
+	static method SaldoProdutoSA()
+	static method PrecoProdutoSA()
+	static method ValidaProdutoArmazem()
+	static method ValidaSLA()
+	static method ValidaGrupoProduto()
+	static method ValidaOS()
+	static method Inclui()
+	static method Altera()
+	static method ValidaSeContaExiste()
+endclass
+
+/*/{Protheus.doc} User Function ValidaInclusaoSA()
+	@author Silfar Castro
+	@since 24/03/2021
+	/*/
+METHOD ValidaInclusaoSA(itemcta) CLASS OXSolicitacaoArmazem
+
+	local xUserDono
+	local lRet := .t.
+
+	if substr(itemcta,1,2) == "HG"
+		xUserDono := Posicione("CTD",1,xFilial("CTD")+itemcta,"CTD->CTD_XDONO")
+		if empty(xUserDono)
+			MsgBox("O item contbil " + itemcta +" no possui um dono associado, e no poder ser utilizado em solicitaes. Por gentileza, entre em contato com a Contabilidade para regularizao.")
+			lRet := .f.
+		endif
+
+	endif
+
+Return lRet
+
+
+/**************************************************************************************************************************/
+/**	Valida se o usurio pode liberar a SA de projeto, caso ele seja um dos responsveis pelo projeto
+/**	@author Silfar Castro
+/**	@since 24/03/2021
+/**************************************************************************************************************************/
+METHOD ValidaLiberacaoSA( xUserDono, xUserMaster ) CLASS OXSolicitacaoArmazem
+
+   // Local aUsers := {}
+    Local lMsg := .f.
+    Local cNomeUser := ''
+
+	Public cacheMsgs 
+	
+	/************************************************************************************/
+	/**  Monta o chache de mensagens, que deve ser sempre destruido no P.E MT107GRV
+	/************************************************************************************/
+	If cacheMsgs == Nil 
+		cacheMsgs := {}		
+	EndIf
+
+	/************************************************************************************/
+	/**  Caso o usurio no seja dono do projeto ou da classe, ento ele no pode liberar
+	/************************************************************************************/
+	If RetCodUsr() <> xUserDono .And. RetCodUsr() <> xUserMaster
+		cNomeUser := UsrFullName(xUserDono)
+
+		mensagem := JsonObject():New()
+		mensagem["SA"] := SCP->CP_NUM
+		mensagem["TIPO_ERRO"] := "DONO_PROJETO"
+		mensagem["OCORRENCIA"] := {SCP->CP_ITEMCTA, SCP->CP_ITEM, cNomeUser}
+		aadd ( cacheMsgs, mensagem )
+
+		Return .F.
+	EndIf
+
+Return .T.
+
+
+
+
+METHOD MensagemLiberacaoSA() CLASS OXSolicitacaoArmazem
+
+	Local nx
+	Local xoMessage 	:= OxMessage():Create()
+	Local nAltura  := 650
+	Local nLargura := 820
+
+	Public cacheMsgs
+
+	If cacheMsgs<>Nil .And. ValType(cacheMsgs)== "A"
+		Conout ( "Destrinchar cacheMSGS")
+		If Len(cacheMsgs) > 0
+
+			xoMessage:evento  := "Liberao de SA"
+			xoMessage:modulo  := "Modulo Estoque"
+			xoMessage:carimbo := "Esta mensagem refere-se validao de Liberao de SA. " 
+		
+			xoMessage:msg := 'Prezado Colaborador, <br><br>'
+			xoMessage:msg += 'Alguns itens da SA no puderam ser liberados, pois trata-se de projetos de melhoria que voc no  o responsvel. <br>'
+			xoMessage:msg += 'Por gentileza, encaminhar a SA para a liberao do(s) colaborador(es). <br><br>'
+			xoMessage:msg += '<table>'
+			xoMessage:msg += '<tr style="color: yellow;"><th style="width: 200px">ITEM CONTA </th><th style="width: 80px"> ITEM </th><th style="width: 400px"> COLABORADOR </th></tr>'
+			for nx := 1 to len(cacheMsgs)
+				If ValType ( cacheMsgs[nx] ) == "J"
+					If nx <= 10		//Limitador de Tela
+						xoMessage:msg += '<tr style="color: white;">'
+						xoMessage:msg += '<td>'+cacheMsgs[nx]["OCORRENCIA"][1] + "</td><td>" + cacheMsgs[nx]["OCORRENCIA"][2] + " </td><td> " + cacheMsgs[nx]["OCORRENCIA"][3] 
+						xoMessage:msg += '</tr>'
+					EndIf
+				EndIf
+			next
+
+			xoMessage:alerta( "OK", nLargura, nAltura )
+		EndIf
+	EndIf
+
+	/************************************************************************************/
+	/** Extremamente importante, pois aps a mensagem exibida, deve limpar esta varivel 
+	/** pblica, para novas chamadas. 
+	/************************************************************************************/
+	cacheMsgs := Nil
+
+Return 
+
+
+/************************************************************************************/
+/** Mostra os saldos do produto da SA
+/************************************************************************************/
+METHOD SaldoProdutoSA() CLASS OXSolicitacaoArmazem
+
+    Local cQuery
+    Local cFilBaseLog := SuperGetMV("PAN_BASLOG",.F.,"")
+	Local xoMessage := OxMessage():Create(12)
+
+    cQuery :=   " SELECT 	SUCURSAL.M0_FILIAL as UNIDADE, " 
+	cQuery += 	" 		B2_cod as PRODUTO, "
+	cQuery += 	" 		B2_LOCAL as ARMAZEM, "
+    cQuery += 	" 		b2_qatu as QTD_ESTOQUE, "
+	cQuery += 	" 		B2_RESERVA as QTD_RESERVA, "
+	cQuery += 	" 		B2_QEMPSA as QTD_EMPENHO_SA "          
+    cQuery += 	" FROM SB2020 B2, SYS_COMPANY SUCURSAL "
+    cQuery += 	" WHERE B2_COD = '" +acols[n][2] + "'" 
+    cQuery += 	" AND   B2.D_e_L_e_t_ <> '*' "
+    cQuery += 	" AND   SUCURSAL.D_E_L_E_T_ <> '*' " 
+	cQuery += 	" AND   M0_CODIGO = '" + substr(cNumEmp,1,2) + "'"
+    cQuery += 	" AND   SUCURSAL.M0_CODFIL = B2_FILIAL "
+    cQuery += 	" AND   ( B2_FILIAL = '" + substr(cNumEmp,3,2) + "'" + " or B2_FILIAL = '" + cFilBaseLog +"')"
+
+    TcQuery cQuery new Alias cAlias
+	
+	xoMessage:evento        :=    "Katrium Ind Quimicas - Saldo de Produto"
+    xoMessage:modulo        :=    "Processos de Automao - Estoque"
+    xoMessage:carimbo       :=    "Saldo de Produto"
+
+	cEstiloTH1 := 'style="border-left: 1px solid black; padding: auto; font-weight: bold; height: 30px; background-color: #8eaeea;vertical-align: middle"'
+	cEstiloTD1 := 'style="border-left: 1px solid black; text-align: center; background-color: #e2e2f9 "'
+    cEstiloTD2 := 'style="border-left: 1px solid black; text-align: center; background-color: #FFFFFF"'
+
+	xoMessage:msg := '<p1> Saldo de Produto</p1><br><br> '
+	xoMessage:msg += '<TABLE width="100%" >'
+	xoMessage:msg += '<tr>'
+    xoMessage:msg += '<th ' + cEstiloTH1 + '> Unidade</th>'
+    xoMessage:msg += '<th ' + cEstiloTH1 + '> Produto</th>'
+    xoMessage:msg += '<th ' + cEstiloTH1 + '> Armazem</th>'
+    xoMessage:msg += '<th ' + cEstiloTH1 + '> Qtd. Estoque</th>'
+    xoMessage:msg += '<th ' + cEstiloTH1 + '> Qtd. Reserva</th>'
+    xoMessage:msg += '<th ' + cEstiloTH1 + '> Qtd. Empenho SA</th>'
+    xoMessage:msg += '</tr>'
+	l1 := .T.
+	while !cAlias->(Eof())
+		xoMessage:msg += '<TR>'
+		xoMessage:msg += '<TD ' + iif(l1, cEstiloTD1, cEstiloTD2) + '>' + AllTrim ( cAlias->UNIDADE ) + '</TD>'
+		xoMessage:msg += '<TD ' + iif(l1, cEstiloTD1, cEstiloTD2) + '>' + AllTrim ( cAlias->PRODUTO ) + '</TD>'
+		xoMessage:msg += '<TD ' + iif(l1, cEstiloTD1, cEstiloTD2) + '>' + AllTrim ( cAlias->ARMAZEM ) + '</TD>'
+		xoMessage:msg += '<TD ' + iif(l1, cEstiloTD1, cEstiloTD2) + '>' + AllTrim ( STR(cAlias->QTD_ESTOQUE ) ) + '</TD>'
+		xoMessage:msg += '<TD ' + iif(l1, cEstiloTD1, cEstiloTD2) + '>' + AllTrim ( STR(cAlias->QTD_RESERVA ) ) + '</TD>'
+		xoMessage:msg += '<TD ' + iif(l1, cEstiloTD1, cEstiloTD2) + '>' + AllTrim ( STR(cAlias->QTD_EMPENHO_SA ) ) + '</TD>'
+		xoMessage:msg += '</TR>'
+		
+		l1 := !l1
+		cAlias->(DBSKIP())	
+	end
+
+	xoMessage:msg += '</TABLE>'
+
+    xoMessage:Alerta( "OK", 800, 400  )   
+
+	cAlias->(DbCloseArea())
+Return 
+
+
+/************************************************************************************/
+/** Mostra o histrico de preos do produto da SA
+/************************************************************************************/
+METHOD PrecoProdutoSA() CLASS OXSolicitacaoArmazem
+
+    Local cQuery
+	Local xoMessage := OxMessage():Create(12)
+
+    cQuery :=   " SELECT round ( sum ( C7_TOTAL ) / sum ( C7_QUANT ), 2 )  AS PRECO_MEDIO,  "
+	cQuery += 	"        min ( C7_TOTAL / C7_QUANT ) AS PRECO_MINIMO,  "
+	cQuery += 	"        max ( C7_TOTAL / C7_QUANT ) AS PRECO_MAXIMO,        "
+    cQuery += 	"        max ( C7_EMISSAO ) as emissao "
+	cQuery += 	" FROM " + RetSqlName("SC7") + " C7, " + RetSqlName("SA2") + " A2 "
+	cQuery += 	" WHERE C7_PRODUTO = '" +acols[n][2] +"' AND C7.D_e_l_e_t_ <> '*' "
+    cQuery += 	" AND C7_EMISSAO > to_char ( sysdate - 365*2  , 'yyyymmdd' ) "
+    cQuery += 	" AND C7_FORNECE || C7_LOJA = A2_COD || A2_LOJA "
+    cQuery += 	" AND A2.D_e_l_E_t_ <> '*'   "
+    cQuery += 	" ORDER BY C7.R_E_C_N_O_ DESC "
+	
+    TcQuery cQuery new Alias cAlias
+	
+	xoMessage:evento        :=    "Katrium Ind Quimicas - Saldo de Produto"
+    xoMessage:modulo        :=    "Processos de Automao - Estoque"
+    xoMessage:carimbo       :=    "Saldo de Produto"
+
+	cEstiloTH1 := 'style="border-left: 1px solid black; padding: auto; font-weight: bold; height: 30px; background-color: #8eaeea;vertical-align: middle"'
+	cEstiloTD1 := 'style="border-left: 1px solid black; text-align: center; background-color: #e2e2f9 "'
+    cEstiloTD2 := 'style="border-left: 1px solid black; text-align: center; background-color: #FFFFFF"'
+
+	xoMessage:msg := '<p1> Preos do Produto ' + acols[n][2]  + '</p1><br><br> '
+	xoMessage:msg += '<TABLE width="100%" >'
+	xoMessage:msg += '<tr>'
+	xoMessage:msg += '<th ' + cEstiloTH1 + '> Preo Mdio </th>'
+    xoMessage:msg += '<th ' + cEstiloTH1 + '> Preo Mnimo</th>'
+    xoMessage:msg += '<th ' + cEstiloTH1 + '> Preo Mximo</th>'
+    xoMessage:msg += '<th ' + cEstiloTH1 + '> Emisso </th>'
+    
+	l1 := .T.
+	while !cAlias->(Eof())
+		xoMessage:msg += '<TR>'
+		xoMessage:msg += '<TD ' + iif(l1, cEstiloTD1, cEstiloTD2) + '>' + AllTrim ( Transform(cAlias->PRECO_MEDIO, "@E 999,999,999.99") )  + '</TD>'
+		xoMessage:msg += '<TD ' + iif(l1, cEstiloTD1, cEstiloTD2) + '>' + AllTrim ( Transform(cAlias->PRECO_MINIMO, "@E 999,999,999.99") )  + '</TD>'
+		xoMessage:msg += '<TD ' + iif(l1, cEstiloTD1, cEstiloTD2) + '>' + AllTrim ( Transform(cAlias->PRECO_MAXIMO, "@E 999,999,999.99") )  + '</TD>'
+		xoMessage:msg += '<TD ' + iif(l1, cEstiloTD1, cEstiloTD2) + '>' + AllTrim ( dtoc(stod(cAlias->EMISSAO) ) ) + '</TD>'
+		xoMessage:msg += '</TR>'
+		
+		l1 := !l1
+		cAlias->(DBSKIP())	
+	end
+
+	xoMessage:msg += '</TABLE>'
+
+    xoMessage:Alerta( "OK", 800, 400  )   
+
+	cAlias->(DbCloseArea())
+Return 
+
+
+/************************************************************************************/
+/** Realiza validao da combinao entre produto e armazm
+/************************************************************************************/
+METHOD ValidaProdutoArmazem(cxTipoProd, cxArmazem,  msgError) CLASS OXSolicitacaoArmazem
+	LOCAL lRet := .T.
+	
+	IF ALLTRIM( cxTipoProd ) == 'AT' .AND. (ALLTRIM(CVALTOCHAR( cxArmazem )) != '10' .AND. ALLTRIM(CVALTOCHAR( cxArmazem )) != '11')
+		msgError := "No pode ser utilizado armazem "+ ALLTRIM(CVALTOCHAR( cxArmazem )) +" para produtos do tipo ativo!"
+		lRet := .F.
+	ENDIF
+
+RETURN lRet
+
+
+/************************************************************************************/
+/** Realiza validao do SLA eem relacao a data atual
+/************************************************************************************/
+METHOD ValidaSLA(cxData, cxProd, msgError) CLASS OXSolicitacaoArmazem
+    LOCAL lRet := .T.
+	Local cDataAtual := Date()
+    Local cDataParam := STOD(cxData)
+	Local cDiferenca
+    Local XLA := Posicione("SBM", 1, xFilial("SBM")+cxProd, "BM_XLA")
+    //Local cNomeProd := BM//Posicione("SBM", 1, xFilial("SBM")+cxProd, "BM_DESC")
+
+    IF Empty(XLA)
+        RETURN lRet
+    ELSE
+		cDiferenca := DateDiffDay(cDataAtual, cDataParam)
+        // Compara a data passada com o SLA do grupo de produtos
+        IF cDiferenca < XLA .OR. cDataAtual > cDataParam
+            msgError := "A data " + DTOC(cDataParam) + " no pode ser utilizada como Data de Necessidade, pois o SLA do grupo de produtos " + cxProd + " - " + AllTrim(SBM->BM_DESC) + "  de " + cValToChar(XLA) + " dias."
+            lRet := .F.
+        ENDIF
+    ENDIF
+
+RETURN lRet
+
+
+/************************************************************************************/
+/** Realiza validao do grupo de produto da SA
+/************************************************************************************/	
+METHOD ValidaGrupoProduto(cxGrupo, cxItem, msgError) CLASS OXSolicitacaoArmazem
+    LOCAL lRet := .T.
+
+    IF ALLTRIM( cxGrupo ) == "4011"
+		msgError := "No pode ser utilizado o grupo "+cxGrupo+" pois este  dedicado para Remessas. Entrar em contato com Setor de Compras se tiver dvidas."    
+        lRet := .F.
+    ENDIF
+
+    IF ALLTRIM( cxGrupo ) == "0205" .AND. (("HGF" $ ALLTRIM( cxItem )) <> .T.)
+		msgError := "No pode ser utilizado o grupo "+cxGrupo+" se a solicitao no for para o Projeto Fenix. Entrar em contato com Setor de Compras se tiver dvidas."    
+        lRet := .F.
+    ENDIF
+
+RETURN lRet
+
+
+/************************************************************************************/
+/** Realiza validao da OS utilizada
+/************************************************************************************/	
+METHOD ValidaOS(cxContaCtb, cxOrdemServico, msgError) CLASS OXSolicitacaoArmazem
+	Local lxRetorno := .T.
+		
+	/*******************************************************************************************/
+	/** Realiza validaes sobre a OS informada quando conta for 5128, Materiais de Manuteno 
+	/*******************************************************************************************/
+	If ascan(CONTAS_OS_OBRIGATORIA, RTrim(cxContaCtb)) > 0
+
+	    cQuery :=   " SELECT count(*) AS QUANTAS FROM " + RetSqlName("STJ")+ " TJ "	
+		cQuery += 	" WHERE TJ_ORDEM = '" +cxOrdemServico +"' AND TJ.D_e_l_e_t_ <> '*' "
+    	cQuery += 	" AND TJ_FILIAL = '"+xFilial("STJ")+"'    
+		
+		TcQuery cQuery new Alias xAliasSTJ
+    	If (!xAliasSTJ -> (EoF()))
+			if xFilial("STJ") != "02"
+				lxRetorno := .t.
+			else 
+				If xAliasSTJ->QUANTAS  ==  0 
+					msgError := "O campo Ordem de Servio precisa ser preenchido com um nmero de OS valida. "
+					lxRetorno := .F.
+				ElseIf Empty(cxOrdemServico)
+					msgError := "O campo Ordem de Servio  de preenchimento obrigatrio quando utilizada conta contbil " + AllTrim ( cxContaCtb ) + ". "
+					lxRetorno := .F.
+				EndIf 
+			endif
+    	Endif
+		xAliasSTJ->(DbCloseArea())
+
+	EndIf
+		
+Return lxRetorno
+
+/*******************************************************************************************/
+/** Inclui registros na tabela 
+/*******************************************************************************************/
+METHOD Inclui( listaItensSA, numeroSA ) CLASS OxSolicitacaoArmazem
+
+   Local i, joxSolicitacao, cNumSolicitacao, cDesc
+
+	// Verifica se a lista no est vazia
+	IF Empty(listaItensSA) 
+		Return .F.
+	ENDIF
+  
+   	/****************************************************************************************/
+	/**  Se o nmero da SA foi passado, utiliza este. Se no, ento calcula um novo nmero
+	/****************************************************************************************/
+	If numeroSA<>Nil .AND. !Empty(numeroSA)
+   		cNumSolicitacao := numeroSA		
+	Else 
+		cNumSolicitacao := U_MDBSEQ("CP_NUM")  
+	EndIf
+
+   DBSelectArea("SCP")
+
+   For i := 1 To Len(listaItensSA)
+      joxSolicitacao := listaItensSA[i]
+	  cDesc := Posicione("SB5", 1, xFilial("SB5") + LISTAITENSSA[i]["PRODUTO"], "B5_CEME")
+
+      If !OxSolicitacaoArmazem():ValidaSeContaExiste(joxSolicitacao)
+          Return .F.
+      Else
+	  	 RecLock("SCP", .T.)  	  	
+         SCP->CP_FILIAL     := joxSolicitacao["FILIAL"]
+         SCP->CP_NUM        := cNumSolicitacao  
+         SCP->CP_ITEM       := joxSolicitacao["ITEM"]
+         SCP->CP_ITEMCTA    := joxSolicitacao["ITEMCONTA"]
+         SCP->CP_CLVL       := joxSolicitacao["CLVL"]
+         SCP->CP_PRODUTO    := joxSolicitacao["PRODUTO"]
+         SCP->CP_QUANT      := Val(joxSolicitacao["QUANTIDADE"])
+         SCP->CP_OS         := joxSolicitacao["OS"]
+         SCP->CP_DATPRF	    := joxSolicitacao["DATA_PREF"]
+         SCP->CP_CC    	    := joxSolicitacao["CENTRO"]
+         SCP->CP_CONTA      := joxSolicitacao["CONTA"]	
+         SCP->CP_LOCAL      := joxSolicitacao["ARMAZEM"]
+         SCP->CP_CODSOLI    := RetCodUsr()
+         SCP->CP_USER       := RetCodUsr()
+         SCP->CP_SOLICIT    := cUserName
+         SCP->CP_DESCRI     := cDesc
+         SCP->CP_EMISSAO    := Date()
+         SCP->CP_STATSA     := "B"
+         SCP->CP_TIPMOD	    := joxSolicitacao["TIPOMOD"]
+         SCP->(MsUnLock())  
+         
+      Endif
+   Next
+
+   SCP->(DbCloseArea())
+
+Return .T.
+
+
+/*******************************************************************************************/
+/**	Altera registros na tabela 
+/*******************************************************************************************/
+METHOD Altera(joxSolicitacao) CLASS OxSolicitacaoArmazem
+
+   Local cQuery, cDesc
+
+	If !OxSolicitacaoArmazem():ValidaSeContaExiste(joxSolicitacao)
+		Return .F.
+	EndIf
+
+	cDesc := Posicione("SB5", 1, xFilial("SB5") + joxSolicitacao["PRODUTO"], "B5_CEME")
+
+   DBSelectArea("SCP")
+
+   SCP->(DbGoTop())
+   SCP->(DbGoTo(joxSolicitacao["RECNO"]))
+
+   RecLock("SCP", .F.)
+      //SCP->CP_FILIAL      := joxSolicitacao["FILIAL"]
+      SCP->CP_ITEMCTA 	  := joxSolicitacao["ITEMCONTA"]
+      SCP->CP_CLVL        := joxSolicitacao["CLVL"]
+      SCP->CP_PRODUTO     := joxSolicitacao["PRODUTO"]
+      SCP->CP_QUANT       := Val(joxSolicitacao["QUANTIDADE"])
+      SCP->CP_OS          := joxSolicitacao["OS"]
+      SCP->CP_DATPRF      := joxSolicitacao["DATA_PREF"]
+      SCP->CP_CC          := joxSolicitacao["CENTRO"]
+      SCP->CP_CONTA       := joxSolicitacao["CONTA"]
+      SCP->CP_LOCAL       := joxSolicitacao["ARMAZEM"]
+	  SCP->CP_CODSOLI     := RetCodUsr()
+	  SCP->CP_USER        := RetCodUsr()
+	  SCP->CP_SOLICIT     := cUserName
+	  SCP->CP_DESCRI      := cDesc
+	  SCP->CP_EMISSAO     := Date()
+	  SCP->CP_STATSA      := "B"
+	  SCP->CP_TIPMOD	  := joxSolicitacao["TIPOMOD"]
+   SCP->(MsUnLock())
+
+   SCP->(DbCloseArea())
+
+RETURN .T.	
+
+/*******************************************************************************************/
+/**	Valida Conta Contabil
+/*******************************************************************************************/
+METHOD ValidaSeContaExiste(joxSolicitacao) CLASS OxSolicitacaoArmazem
+
+   LOCAL cQuery, cConta, lContaExiste
+
+   cConta := joxSolicitacao["CONTA"]
+
+   cQuery := "SELECT COUNT(*) FROM " + RetSqlName("CT1") + " WHERE CT1_CONTA = '" + cConta + "'"
+   TcQuery(cQuery) New Alias 'Qry'
+
+   DBSelectArea('Qry')
+   ('Qry')->(DbGoTop())
+
+   // Retorna o resultado da consulta
+		While !EOF()
+			If !Empty(('QRY')->('COUNT(*)')) 
+				lContaExiste := ('QRY')->(FieldGet(1))
+			EndIf
+			('Qry')->(DBSKIP())
+		Enddo
+  	 ('QRY')->(DbCloseArea())
+
+	If lContaExiste <= 0
+      Return .F.   
+   	EndIf
+
+Return .T.

@@ -1,0 +1,431 @@
+#include 'protheus.ch'
+#include 'parmtype.ch'
+#Include "rwmake.ch"
+#Include 'topconn.ch'
+#Include "TbiConn.ch"
+
+#define	TAMANHO_CAMPO_SA		TamSX3("CP_NUM")[1]
+#define	TAMANHO_CAMPO_ITEM		TamSX3("CP_ITEM")[1]
+#define	TAMANHO_CAMPO_SEQ		TamSX3("RFW_SEQUEN")[1]
+#define LISTA_CARACTERES	    { "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N","O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z" }
+
+
+class OxSolicitacaoMontagem  
+
+	public data idSolicitacao
+	public data listaReq 
+	public data keyCalculo
+	public data memoriaCalculo
+	private data listaErros
+	private data listaEntregas
+	
+	public method Create() CONSTRUCTOR
+	public method Executa()
+	public method AnalisaMemoriaCalculo()
+	public method RegistraSolicitacoes()
+	public method MostraErros()
+	public method GeraPackingList()
+
+	static method EscolheMelhorSA()
+	static method RecuperaSAs()
+	static method QuantidadeJaRequisitada()
+	static method QuantidadeMemoriaCalculo()
+	static method GravaMemoriaCalculo()
+endclass	
+
+
+/*******************************************************************************************/
+/** 
+/*******************************************************************************************/
+METHOD Create ( listaReq ) CLASS OxSolicitacaoMontagem
+
+	Self:keyCalculo := OxKey():GetProximo("RFW_SEMANA", "FENIX_MONTAGEM")  		
+	Self:listaReq := listaReq
+	
+	
+Return 
+
+
+/*******************************************************************************************/
+/** 
+/*******************************************************************************************/
+METHOD Executa () CLASS OxSolicitacaoMontagem
+
+	Processa ( { || runImporta ( Self:listaReq ) }, "Processando memória de cálculo...", "Importando solicitações de montagem Fenix", .F. ) 		
+	
+Return 
+
+
+Static Function runImporta( lista ) 
+
+	Local nx
+	Local listaSolics, solic, requis
+
+	/**************************************************************************************************************/
+	/** Limpa os hash
+	/**************************************************************************************************************/
+	OxKey():DropaHashNumerica( "SOLICIT_MONTA" )
+
+	For nx := 1 To Len ( lista )
+		requis := lista[nx]		
+		listaSolics := OxSolicitacaoMontagem():RecuperaSAs( requis )
+		solic := OxSolicitacaoMontagem():EscolheMelhorSA( listaSolics, requis ) 
+		requis["MELHOR_SA"] := solic 
+
+        OxSolicitacaoMontagem():GravaMemoriaCalculo ( requis, nx )
+    Next nx
+
+Return 
+
+
+Static Function runAnalisa()
+Return 
+
+
+/******************************************************************************/
+/**  Em caso de sucesso, faz o registro de toda a memória de cálculo na ZG9, 
+/**	 incluindo de fato as solicitações de montagem 
+/******************************************************************************/
+Static Function runRegistra( idSolicitacao, xoHashEntregas, calculo )
+	
+	Local nx 
+	
+	DbSelectArea("ZG9")
+	For nx:=1 To Len(calculo)
+		
+		Posicione ( "SCP", 1, xFilial("SCP")+calculo[nx]["SA"], "CP_PRODUTO")
+
+		Reclock("ZG9",.T.)
+		ZG9->ZG9_FILIAL := xFilial("ZG9")
+		ZG9->ZG9_ID 	:= idSolicitacao  
+		ZG9->ZG9_DATA  	:= DDATABASE
+		ZG9->ZG9_PROD  	:= SCP->CP_PRODUTO
+		ZG9->ZG9_QTDE  	:= calculo[nx]["TOTAL"]
+		ZG9->ZG9_SA    	:= SCP->CP_NUM
+		ZG9->ZG9_ITEM   := SCP->CP_ITEM
+		ZG9->ZG9_DTENTR	:= STOD ( calculo[nx]["ENTREGA"] )
+		ZG9->ZG9_ETAPA 	:= xoHashEntregas:Get( calculo[nx]["ENTREGA"] )[1]
+		ZG9->ZG9_PONTO	:= fPonto ( SCP->CP_PRODUTO, SCP->CP_LOCAL, ZG9->ZG9_QTDE )
+		ZG9->(MsUnlock())  
+
+		RFW->(DbGoTo( calculo[nx]["RECNO"] ))
+		Reclock("RFW", .F.)
+		RFW->RFW_DTFIM	:=	DDATABASE
+		RFW->RFW_HRFIM	:=	Time()
+		RFW->(MsUnlock())
+	Next nx
+
+	ZG9->(DbCloseArea())
+
+Return 
+
+
+Static Function fPonto ( produto, armazem, quantidade )
+
+	Local unidadeLogistica := SuperGetMV("PAN_BASLOG", .F., "XX")	
+	Local estoqueBaseLog := Posicione ( "SB2",1, unidadeLogistica+produto + armazem, "B2_QATU")
+
+	If estoqueBaseLog >= quantidade
+		Return "PQ"
+	EndIf
+Return "HG"
+
+
+/*******************************************************************************************/
+/** 
+/*******************************************************************************************/
+METHOD EscolheMelhorSA ( listaSolics, joxProduto ) CLASS OxSolicitacaoMontagem
+	
+	Local nx , saldo
+	Local solicitacaoMelhor, solicitacao, solicitacaoHash
+
+	For nx :=1 To Len ( listaSolics )
+		solicitacao := listaSolics[nx]
+		saldo := solicitacao["QUANT"]
+		saldo := saldo - OxSolicitacaoMontagem():QuantidadeJaRequisitada( solicitacao ) - OxSolicitacaoMontagem():QuantidadeMemoriaCalculo( solicitacao ) 
+		solicitacao["SALDO"] := saldo
+
+		KTXLOG():log ( "montagem.log", joxProduto:toJson(), .T., .T. ) 
+		KTXLOG():log ( "montagem.log", solicitacao:toJson(), .T., .T. ) 
+
+		If saldo == joxProduto["Q"]
+			solicitacaoMelhor	:=	solicitacao
+			Exit
+		EndIf
+
+		If saldo > joxProduto["Q"]
+			solicitacaoMelhor	:=	solicitacao
+		EndIf
+
+	Next nx
+
+	If solicitacaoMelhor <> Nil 
+		nxTotal := 0
+		solicitacaoHash := OxKey():RecuperaHashNumerica( "SOLICIT_MONTA", solicitacao["SA"] ) 
+		 If solicitacaoHash == Nil 
+		 		nxTotal := solicitacaoMelhor["QUANT"]
+		 Else 
+		 		nxTotal := solicitacaoHash - joxProduto["Q"]
+		 EndIf		
+		 OxKey():SalvaHashNumerica("SOLICIT_MONTA", solicitacao["SA"], nxTotal)		 
+	EndIf 
+
+return solicitacaoMelhor
+
+
+
+/*******************************************************************************************/
+/**	Obtém quanto de quantidade já foi processada pra esta SA em solicitações passadas
+/*******************************************************************************************/
+METHOD QuantidadeJaRequisitada ( joxSolicitacao ) CLASS OxSolicitacaoMontagem
+	
+	//Local keyCalcRoteiro := OxKey():GetAtual("RFW_SEMANA", "FENIX_MONTAGEM")  	
+	Local tamanhoChaveSolicitacao	:=	TAMANHO_CAMPO_SA + 1 + TAMANHO_CAMPO_ITEM
+	Local nxAtendida := 0
+
+	qryTotal := " SELECT SUM ( ZG9_QTDE ) SOMA FROM ZG9020 ZG9  "
+	qryTotal += " WHERE D_E_L_E_T_ <> '*' "
+	qryTotal += " AND ZG9_PROD = '"+joxSolicitacao["PRODUTO"]+"'  "	
+	qryTotal += " AND ZG9_SA || '-' || ZG9_ITEM = '"+joxSolicitacao["SA"]+"'    "
+
+	TcQuery qryTotal new Alias xAliasMemoCalc		
+	While(!xAliasMemoCalc->(Eof()))		  	  	    	    
+		nxAtendida := xAliasMemoCalc->SOMA	  
+		xAliasMemoCalc->(dbSkip())                
+	End
+	xAliasMemoCalc->(dbCloseArea())
+
+return nxAtendida
+
+
+/*******************************************************************************************/
+/**	Obtém quanto de quantidade já foi processado pra este produto dentro da memória de cálculo
+/*******************************************************************************************/
+METHOD QuantidadeMemoriaCalculo ( joxSolicitacao ) CLASS OxSolicitacaoMontagem
+	
+	Local keyCalcRoteiro := OxKey():GetAtual("RFW_SEMANA", "FENIX_MONTAGEM")  	
+	Local tamanhoChaveSolicitacao	:=	TAMANHO_CAMPO_SA + 1 + TAMANHO_CAMPO_ITEM
+	Local nxAtendida := 0
+
+	qryTotal := " SELECT SUM ( RFW_TOTPRC ) SOMA FROM RFW020 RFW0 "
+	qryTotal += " WHERE D_E_L_E_T_ <> '*' "
+	qryTotal += " AND   RFW_PROCES = 'MONTA'  "
+	qryTotal += " AND   RFW_ROTEIR = '"+keyCalcRoteiro+"'  AND RFW_DTINI = '"+DTOS(DDATABASE)+"' "
+	qryTotal += " AND   SUBSTR ( UTL_RAW.CAST_TO_VARCHAR2( RFW_LOG ) , 1, "+STR(tamanhoChaveSolicitacao)+")= '"+joxSolicitacao["SA"]+"'    "
+
+	TcQuery qryTotal new Alias xAliasMemoCalc		
+	While(!xAliasMemoCalc->(Eof()))		  	  	    	    
+		nxAtendida := xAliasMemoCalc->SOMA	  
+		xAliasMemoCalc->(dbSkip())                
+	End
+	xAliasMemoCalc->(dbCloseArea())
+
+return nxAtendida
+
+
+/*******************************************************************************************/
+/**  Recupera todasas SA da combinação produto x projeto x classe
+/*******************************************************************************************/
+METHOD RecuperaSAs ( joxProduto ) CLASS OxSolicitacaoMontagem
+	
+	Local lista := {}
+	Local joxSolic
+	
+	ChkFile("RFW")
+	ChkFile("ZG9")
+
+	If ValType ( joxProduto["PRODUTO"] ) == "N"
+		joxProduto["PRODUTO"]  := PadL ( cValToChar ( joxProduto["PRODUTO"] ), 9 , "0" )
+	EndIf
+	If ValType ( joxProduto["CC"] ) == "N"
+		joxProduto["CC"]  :=  cValToChar ( joxProduto["CC"] )
+	EndIf
+
+	qrySoli := " SELECT * from SCP020 CP  "
+	qrySoli += " WHERE ( CP_LOCAL = '11' OR CP_LOCAL LIKE 'F%' )    "
+	qrySoli += " AND D_E_L_E_T_ <> '*'   "
+	qrySoli += " AND CP_EMISSAO > '2022'             			AND CP_PRODUTO = '"+joxProduto["PRODUTO"]+"'  "
+	qrySoli += " AND CP_ITEMCTA = '"+joxProduto["PROJETO"]+"'      AND CP_CLVL = '"+joxProduto["CLASSE"]+"'  "
+	qrySoli += " AND CP_CC = '"+joxProduto["CC"]+"'  ""
+
+	TcQuery qrySoli new Alias xAliasMemoCalc		
+	While(!xAliasMemoCalc->(Eof()))		  	  	    	    
+
+		joxSolic := JsonObject():New()
+		joxSolic["SA"] 		:= xAliasMemoCalc->CP_NUM + "-" + xAliasMemoCalc->CP_ITEM
+		joxSolic["QUANT"]	:= xAliasMemoCalc->CP_QUANT
+		joxSolic["ARMAZEM"]	:= xAliasMemoCalc->CP_LOCAL
+		joxSolic["PRODUTO"]	:= xAliasMemoCalc->CP_PRODUTO
+		joxSolic["OBS"]		:= xAliasMemoCalc->CP_OBS
+		aadd ( lista, joxSolic )
+
+		xAliasMemoCalc->(dbSkip())                
+	End
+	xAliasMemoCalc->(dbCloseArea())
+
+
+return lista
+
+
+/*******************************************************************************************/
+/**	Faz a gravação da memória de cálclo (tabela RFW) para todos os registros processados
+/*******************************************************************************************/
+METHOD GravaMemoriaCalculo ( joxProduto, sequencia ) CLASS OxSolicitacaoMontagem
+	
+	Local lRet := .T.
+
+	Reclock("RFW", .T.)
+	RFW->RFW_PROCES	:=	"MONTA"
+	RFW->RFW_SEMANA := 	OxKey():GetAtual("RFW_SEMANA", "FENIX_MONTAGEM")	//LISTA_CARACTERES[nIndice1 + 1] + LISTA_CARACTERES[nIndice2 + 1]
+	RFW->RFW_PERIOD	:=	Substr ( DTOS ( DDATABASE ), 1, 6 )
+	RFW->RFW_ROTEIR	:=	StrZero ( joxProduto["LINHA"], 3 )	//OxKey():GetAtual("RFW_ROTEIR", "FENIX_MONTAGEM")
+	RFW->RFW_DTINI 	:=	DDATABASE
+	RFW->RFW_HRINI 	:=	Time()
+	RFW->RFW_TOTPRC 	:=	joxProduto["Q"]
+	If joxProduto["MELHOR_SA"]<>Nil
+		RFW->RFW_TOTCAL 	:=	joxProduto["MELHOR_SA"]["SALDO"] - joxProduto["Q"]
+		RFW->RFW_TOTNC  	:=	joxProduto["MELHOR_SA"]["SALDO"]
+		RFW->RFW_LOG  		:=	joxProduto["MELHOR_SA"]["SA"] + " -- " + DTOS(joxProduto["ENTREGA"])
+		RFW->RFW_TEMPO 		:= "COM_SA"	
+	Else
+		RFW->RFW_TEMPO 		:= "SEM_SA"	
+	EndIf
+	RFW->RFW_SEQUEN  	:=	StrZero ( sequencia, TAMANHO_CAMPO_SEQ )
+	RFW->RFW_USER  		:=	RetCodUsr()
+	RFW->(MsUnlock())
+
+return lRet
+
+
+/*******************************************************************************************/
+/**	Roda a anáise da memória de cálculo, checando se há SAs, e catalogando eventuais erros
+/*******************************************************************************************/
+METHOD AnalisaMemoriaCalculo() CLASS OxSolicitacaoMontagem	
+
+    Local cQuery := " SELECT RFW_TEMPO, RFW_TOTPRC, RFW_ROTEIR, R_E_C_N_O_, " + ;
+                    " 		 UTL_RAW.CAST_TO_VARCHAR2(DBMS_LOB.SUBSTR(RFW_LOG, 4000, 1)) as LOGI " + ;
+                    " FROM RFW020 RFW " + ;
+                    " WHERE RFW.D_E_L_E_T_ <> '*' " + ;
+                    " AND RFW_PERIOD = TO_CHAR ( SYSDATE, 'yyyymm' ) " + ;
+					" AND RFW_DTFIM = ' ' 	" + ;
+                    " AND RFW_SEMANA = '"+Self:keyCalculo+"'"
+
+	Self:listaErros := {}
+	Self:memoriaCalculo := {}
+	Self:listaEntregas := OxVector():Create({})
+
+    // Cria o objeto TCQuery
+    TcQuery cQuery New Alias xAliasQuery
+
+    // Itera pelos resultados da consulta
+    While (!xAliasQuery->(Eof()))
+        
+        joxLinha := JsonObject():New()
+        joxLinha["OCORRENCIA"] 	:= AllTrim ( xAliasQuery->RFW_TEMPO )
+        joxLinha["TOTAL"] 	:= xAliasQuery->RFW_TOTPRC
+		joxLinha["LINHA"] 	:= xAliasQuery->RFW_ROTEIR
+        If joxLinha["OCORRENCIA"] == "COM_SA"
+			joxLinha["RECNO"] 		:= xAliasQuery->R_E_C_N_O_
+			joxLinha["RFW_LOG"] 	:= xAliasQuery->LOGI
+			joxLinha["SA"] 			:= Replace ( Substr (  xAliasQuery->LOGI, 1, 9 ) , '-', '' )
+			joxLinha["ENTREGA"] 	:= Substr (  xAliasQuery->LOGI, At ("--", xAliasQuery->LOGI)+3, 8 ) 
+
+			Self:listaEntregas:AddNoRepeat ( joxLinha["ENTREGA"] )
+		EndIf 
+		If joxLinha["OCORRENCIA"] == "SEM_SA"
+			aadd ( Self:listaErros, "Não existe SA com saldo para combinação da linha " + joxLinha["LINHA"]  )		//Buscar erro joxLinha["LINHA"] 
+		EndIf
+		
+        AAdd( Self:memoriaCalculo, joxLinha)
+        xAliasQuery->(dbSkip())
+    EndDo
+    xAliasQuery->(dbCloseArea())
+
+	If Len(Self:listaErros) > 0 
+		Return .F.
+	EndIf 
+
+Return .T.
+
+
+/*******************************************************************************************/
+/**	Faz os registros de solicitação de montagem
+/*******************************************************************************************/
+METHOD RegistraSolicitacoes () CLASS OxSolicitacaoMontagem	
+
+	Local nxEntrega, entrega
+	Local idSolicitacao := OxKey():GetProximo("ZG9_ID", "FENIX_MONTAGEM")
+	Local xoHashEntregas := OxHashMap():Create()
+	Local etapaUltima := "E00"
+
+	/*******************************************************************************************/
+	/**	Calcula o código da etapa, baseado nas diferentes datas de entrega da solicitação 
+	/*******************************************************************************************/
+	For nxEntrega :=1 To Self:listaEntregas:Size()
+		 etapaUltima := Soma1( etapaUltima )
+		 entrega := Self:listaEntregas:Get ( nxEntrega )
+		 xoHashEntregas:PutUnique ( entrega, etapaUltima )		 
+	Next nxEntrega
+
+	/*******************************************************************************************/
+	/**	Roda o processamento de inclusão das solicitações
+	/*******************************************************************************************/
+	Processa ( { || runRegistra ( idSolicitacao, xoHashEntregas, Self:memoriaCalculo ) }, "Registrando solicitações...", "Importando solicitações de montagem Fenix", .F. ) 		
+
+	FWAlertInfo("Solicitação de Montagem " + idSolicitacao  + " gerado com sucesso, com "+ cValToChar( Self:listaEntregas:Size() ) + " registros de data de entrega.", "Katrium Ind Quimicas")
+	Self:idSolicitacao := idSolicitacao
+	/*******************************************************************************************/
+	/**	Gera o relatório packing list e o envia por e-mail
+	/*******************************************************************************************/
+	Processa ( { || Self:GeraPackingList() }, "Gerando relatório ...", "Enviando packing list por e-mail", .F. ) 			
+	
+Return  
+
+
+
+/*******************************************************************************************/
+/**	Exibe quando com os erros de processamento
+/*******************************************************************************************/
+METHOD MostraErros () CLASS OxSolicitacaoMontagem	
+
+	Local dimAltura		:=	600
+	Local dimLargura	:=	1400
+    Local cxMemoCalculo, nx
+
+	Define Font oFont Name "Mono AS" Size 8, 14
+	Define MsDialog oDlgx Title "Atualização concluida." From 3, 0 to dimAltura, dimLargura Pixel
+
+    cxMemoCalculo	:=	""
+	For nx := 1 To Len ( Self:listaErros )
+		cxMemoCalculo += Self:listaErros[nx]
+		cxMemoCalculo += Chr(13) + Chr(10)
+	Next nx
+    
+	@ 5, 5 Get oMemo Var cxMemoCalculo Memo Size dimLargura*0.45, dimAltura*0.35 Of oDlgx Pixel
+	oMemo:bRClicked := { || AllwaysTrue() }
+	oMemo:oFont     := oFont
+
+	Define SButton From 500, 300 Type  1 Action oDlgx:End() Enable Of oDlgx Pixel // Apaga
+
+	Activate MsDialog oDlgx Center	
+Return 
+
+
+METHOD GeraPackingList() CLASS OxSolicitacaoMontagem
+	
+	Local nxEntrega, urlRelatorio, nParameters
+	Local nRelatorio := "rel_suprim_separacao"
+
+	For nxEntrega	:=	 1 To Self:listaEntregas:Size() 
+		nParameters := { {"PARAM_ID",  Self:idSolicitacao }	,;    	        
+					 	 {"PARAM_ENTREGA", Self:listaEntregas:Get(nxEntrega) }; 
+        }
+
+		urlRelatorio	:=	""		//a passagem pro JasReport tem que ser diferente de Nulo
+		u_JASREPORT( nRelatorio, nParameters, "PDF", .F., .T., @urlRelatorio )
+
+		Conout ( urlRelatorio )
+		KMAIL_FENIX():AvisaSolicitacaoMontagem( Self:idSolicitacao, Self:listaEntregas:Get(nxEntrega), urlRelatorio )
+	Next nxEntrega
+
+Return 	

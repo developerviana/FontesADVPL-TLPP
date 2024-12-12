@@ -1,0 +1,824 @@
+#INCLUDE "PROTHEUS.CH"
+#INCLUDE "RWMAKE.CH"
+#Include "TbiConn.Ch"
+#Include "topconn.ch"
+#INCLUDE "TOTVS.ch"
+
+#define cNomeColunaDesmontagem   "Data da Desmontagem"
+#define cNomeColunaMontagem     "Data de Montagem"
+
+/*------------------------------------------------------------------------//
+//Programa:	 KWIZMNT1
+//Autor:	 Victor Lucas
+//Data:		 02/09/2024
+//Descricao: Importação planilhas de Andaimes.
+//------------------------------------------------------------------------*/
+User Function KWIZMNT1()
+    Local cTexto
+    Local bConfirm
+    Local bSair
+
+    Local oDialog
+    Local oContainer
+    Public cSuccessCount := 0
+    Public lTableCleaned := .F.
+
+    Private cPlanilha  := ""
+    Private aOpcoes := {}
+    Private cAbas := ""
+    Private dDataIni := sToD("")
+    Private dDataFin := sToD("")
+     
+    Private oExcel 
+    Private oTGet1
+    Private oTGet2
+    Private oTButton1
+
+    bConfirm := {|| FwMsgRun(,{|oSay| Iif(Validarbotao(dDataIni, dDataFin), fImporta(oContainer, aOpcoes, dDataIni, dDataFin), NIL)}, 'Buscando Planilhas ... ', "",) }
+    bSair := {|| Iif(MsgYesNo('Você tem certeza que deseja sair da rotina?', 'Sair da rotina'), (oDialog:DeActivate()), NIL) }
+
+    oDialog := FWDialogModal():New()
+    oDialog:SetBackground(.T.)
+    oDialog:SetTitle('Importação Planilhas de Andaimes')
+    oDialog:SetSize(220, 360) 
+    oDialog:EnableFormBar(.T.)
+    oDialog:SetCloseButton(.F.)
+    oDialog:SetEscClose(.F.)  
+    oDialog:CreateDialog()
+    oDialog:CreateFormBar()
+    oDialog:AddButton('Importar', bConfirm, 'Confirmar', , .T., .F., .T., )
+    oDialog:AddButton('Sair', bSair, 'Sair', , .T., .F., .T., )
+    
+    oContainer := TPanel():New( ,,, oDialog:getPanelMain() )
+    oContainer:Align := CONTROL_ALIGN_ALLCLIENT
+
+    cTexto := '• A data de desmontagem não pode ser anterior à data de montagem.'
+
+    oSay2 := TSay():New(010,010,{||cTexto},oContainer,,,,,,.T.,,,800,20)
+
+    // Adiciona campos para selecionar a planilha
+    oSay1 := TSay():New(035,010,{||'Selecione a Planilha:'},oContainer,,,,,,.T.,,,100,9)
+    oTGet0 := tGet():New(045,010,{|u| if(PCount()>0,cPlanilha:=u,cPlanilha)},oContainer ,180,9,"",,,,,,,.T.,,, {|| .T. } ,,,,.F.,,,"cPlanilha")
+
+    // Função chamada para selecionar a planilha e obter pastas *
+    oTButton1 := TButton():New(045, 200, "Selecionar..." ,oContainer,{|| (cPlanilha:=cGetFile("Arquivos Excel | *.xls*",OemToAnsi("Selecione Diretorio"),,"",.F.,GETF_LOCALHARD+GETF_NETWORKDRIVE,.F.)), FwMsgRun(,{|oSay|PegaAbas(oSay)},'Buscando Planilhas ... ',"",) } , 50,10,,,.F.,.T.,.F.,,.F.,,,.F. )
+
+    // Adiciona campos para selecionar a pasta
+    oSay5 := TSay():New(065,010,{||'Selecione uma Aba da planilha: '},oContainer,,,,,,.T.,,,100,9)
+    oCombo1 := TComboBox():New(075,010,{|u|if(PCount()>0,cAbas:=u,cAbas)},aOpcoes,100,9,oContainer,,,,,,.T.,,,,,,,,,'cAbas')    
+
+    // Adiciona campos para data inicial e final
+    oSay4 := TSay():New(100,010,{||'Data Inicial:'},oContainer,,,,,,.T.,,,200,20)
+    oTGet1 := tGet():New(110,010,{|u| if(PCount()>0,dDataIni:=(u),dDataIni)}, oContainer ,100,9,"",,,,,,,.T.,,, {|| .T. } ,,,,.F.,,,"dDataIni")
+    oSay5 := TSay():New(140,010,{||'Data Final:'},oContainer,,,,,,.T.,,,150,20)
+    oTGet2 := TGet():New(150,010,{|u| if(PCount()>0,dDataFin:=(u),dDataFin)}, oContainer ,100,9,"",,,,,,,.T.,,, {|| .T. } ,,,,.F.,,, "dDataFin")
+
+    oDialog:Activate()
+Return
+
+//--------------------------
+//Valida a funcionalidade do botão de importação.
+//--------------------------
+Static Function Validarbotao(dDataIni, dDataFin)
+        If Empty(dDataIni) .or. Empty(dDataFin)
+            FWAlertWarning("Datas inicial e Data final devem ser preenchidas antes de importar a tabela.", "Atenção!")
+            Return .F.
+        ElseIf dDataFin < dDataIni
+            FWAlertWarning("A data final não pode ser anterior à data inicial.", "Atenção!")
+            Return .F.
+        EndIf
+    Return .T.
+Return 
+
+//--------------------------
+// Função para extrair as abas da planilha.
+//--------------------------
+Static Function PegaAbas(oSay)
+    Local nContP
+
+    oExcel := YExcel():new(, cPlanilha)
+    oExcel:OpenRead(cPlanilha)
+
+    For nContP := 1 to oExcel:LenPlanAt()
+        oExcel:SetPlanAt(nContP)
+        AADD(aOpcoes, ALLTRIM(STR(nContP) + ' - ' + EncodeUtf8(oExcel:GetPlanAt("2"))))
+    Next
+
+    If Len(aOpcoes) > 0
+        cAbas := aOpcoes[1]
+        oCombo1:SetItems(aOpcoes)
+        oCombo1:Refresh()
+    Else
+        FWAlertError("Nenhuma aba encontrada na planilha. Verifique o arquivo e tente novamente.", "Erro")
+    EndIf
+Return aOpcoes
+
+//----------------------------------------
+// Verificar se a planilha foi selecionada.
+//----------------------------------------
+Static Function fImporta(oContainer, aOpcoes, dDataIni, dDataFin)
+    Local lRet := .T.
+
+    If Empty(cPlanilha)
+        FWAlertInfo("Por favor, informe a planilha antes de continuar.", "Nenhuma planilha selecionada!")
+        lRet := .F.
+    Endif
+
+    If lRet
+        If FWAlertNoYes("Confirma a importação com os dados informados?", "Importação")
+            lRet := .T.
+                If lRet
+                    FwMsgRun(,{|oSay| lRet := fValidaDatas(oContainer, aOpcoes, dDataIni, dDataFin)}, 'Validando dados da Planilha. Aguarde ... ', "",)
+                Endif
+        Else
+            lRet := .F.
+        Endif
+    Endif
+Return lRet
+
+//--------------------------
+//Valida montagem e desmontagem.
+//--------------------------
+Static Function fValidaDatas(oContainer, aOpcoes, dDataIni, dDataFin, cCodIntValor)
+
+    Local colDataDesmontagem := 0
+    Local colDataMontagem := 0
+    Local dDataDesmontagem
+    Local dDataMontagem
+    Local cCabecalho
+    Local nColuna
+    Local aLinhas
+    Local aLinha
+    Local cdebug
+    Local cColVigde := "BF5_VIGDE"
+    Local cColVigate := "BF5_VIGATE"
+    Local cColCodInt := "BF5_CODINT"
+    Local lVigdeTrue := .F.
+    Local lVigdateTrue := .F.
+    Local lCodIntTrue := .F.
+    Local lColEncontrada := .F.
+    Local cCodIntValor := ""
+    Local jPosColunas   := JsonObject():New()
+
+    //Retorna os dados da tabela BF5020
+    DbUseArea(.T., "TOPCONN", "BF5020", "Qry", .F., .F.)
+    
+    Local aEstrutura := DbStruct()
+    Local nCampos := Len(aEstrutura)
+    Local i := 1 
+    
+    While i <= nCampos
+        If aEstrutura[i, 1] == cColVigde
+            lVigdeTrue := .T.
+        ElseIf aEstrutura[i, 1] == cColVigate
+            lVigdateTrue := .T.
+        ElseIf aEstrutura[i, 1] == cColCodInt
+            lCodIntTrue := .T.
+        EndIf
+        i := i + 1
+    EndDo
+
+    If lVigdeTrue .AND. lVigdateTrue
+        DbGoTop()
+        Do While !eof()
+            If dDataIni >= BF5_VIGDE .AND. dDataFin <= BF5_VIGATE
+                lColEncontrada := .T.
+                cCodIntValor := BF5_CODINT
+                Exit
+            EndIf
+            DbSkip()
+        EndDo
+
+        If !lColEncontrada
+            FWAlertError("Não foi encontrado tabela de preço para o período selecionado.", "Alerta!")
+            Qry->(DbCloseArea())
+            Return
+        EndIf
+    EndIf
+   
+    //Abre planilha Excel
+    oExcel := YExcel():New(, cPlanilha)
+    oExcel:OpenRead(cPlanilha)
+    oExcel:SetPlanAt(oCombo1:nAt)
+
+    // Obtém o número total de colunas e verifica os cabeçalhos
+    aTamCol := oExcel:ColTam(2)
+    For nColuna := 1 To aTamCol[2]
+        cCabecalho := oExcel:GetValue(2, nColuna)
+        If ValType(cCabecalho) == "C" .and. !Empty(cCabecalho)
+            If cCabecalho == cNomeColunaMontagem
+                colDataMontagem := nColuna
+                cCabecalhoEncontradoM := cCabecalho
+            ElseIf cCabecalho == cNomeColunaDesmontagem
+                colDataDesmontagem := nColuna
+                cCabecalhoEncontradoD := cCabecalho
+            EndIf
+            cCabecalho := StrTran ( StrTran ( cCabecalho, "ç", "c" ), "ã", "a" )
+            jPosColunas[ Upper( cCabecalho ) ] := nColuna
+            If colDataMontagem > 0 .and. colDataDesmontagem > 0
+                Exit
+            EndIf
+        EndIf
+    Next
+
+    // Verifica se as colunas foram encontradas
+    If ValType(colDataMontagem) != "N" .or. colDataMontagem == 0 .or. ValType(colDataDesmontagem) != "N" .or. colDataDesmontagem == 0
+        FWAlertError("Colunas não encontradas", "Erro na Validação!")
+        Qry->(DbCloseArea())
+        oExcel:Close()
+        Return .T.
+    Else
+        //FWAlertSuccess("Colunas encontradas: " + cCabecalhoEncontradoM + " e " + cCabecalhoEncontradoD, "Validação")
+    EndIf
+
+    aLinhas := oExcel:LinTam()
+    For aLinha := 3 to aLinhas[2]
+        If aLinha == 5247
+            cdebug := .T.
+        EndIf
+        dDataMontagemObj := oExcel:GetValue(aLinha, colDataMontagem)
+        dDataDesmontagemObj := oExcel:GetValue(aLinha, colDataDesmontagem)
+
+        If ValType(dDataMontagemObj) == "O"
+            dDataMontagem := dDataMontagemObj:DDATA
+        ElseIf ValType(dDataMontagemObj) == "C"
+            dDataMontagem := CTOD(dDataMontagemObj)
+        ElseIf ValType(dDataMontagemObj) == "D"
+            dDataMontagem := dDataMontagemObj
+        EndIf
+
+        If ValType(dDataDesmontagemObj) == "O"
+            dDataDesmontagem := dDataDesmontagemObj:DDATA
+        ElseIf ValType(dDataDesmontagemObj) == "C"
+            dDataDesmontagem := CTOD(dDataDesmontagemObj)
+        ElseIf ValType(dDataDesmontagemObj) == "D"
+            dDataDesmontagem := dDataDesmontagemObj
+        ElseIf ValType(dDataDesmontagemObj) == "U"
+            dDataDesmontagem := NIL
+        EndIf
+ 
+        // Verifica se as datas são válidas
+        If ValType(dDataMontagem) != "D" 
+            FWAlertError("As datas na linha " + STR(aLinha) + " não são válidas: Montagem - " + STR(dDataMontagem))
+            lValida := .F.
+        EndIf
+
+       // Verifica se a data de desmontagem está preenchida e é anterior à data de montagem
+        If !Empty(dDataDesmontagem) .AND. ValType(dDataDesmontagem) = "D"
+            If (dDataDesmontagem < dDataMontagem) .And. ( dDataDesmontagem >= dDataIni ) 
+               FWAlertError("Solicitação de Andaime na linha " + ALLTRIM(STR(aLinha)) + " contém data de desmontagem anterior à data de montagem.", 'Erro de Validação')
+                lTableCleaned = .F.
+                Qry->(DbCloseArea())
+                oExcel:Close()
+                Return .F.
+            EndIf
+        Endif
+        If Empty ( dDataDesmontagem ) .OR. dDataDesmontagem >= dDataIni
+            fTableInsert(aLinha, oExcel, dDataIni, dDataFin, dDataMontagem, dDataDesmontagem, cSuccessCount, jPosColunas)
+        EndIf
+    Next
+    ConcluiImportacao(aLinha, oExcel, dDataIni, dDataFin, dDataMontagem, dDataDesmontagem, cSuccessCount, cCodIntValor)
+Return .T.
+    
+//--------------------------
+//Verifica condições e insere na tabela.
+//--------------------------
+Static Function fTableInsert(aLinha, oExcel, dDataIni, dDataFin, dDataMontagem, dDataDesmontagem, cSuccessCount, jPosColunas)
+
+    Local cSM
+    Local nCubagem
+    Local cItem
+    Local cSolicitante
+    Local nCC
+    Local nDias
+    Local cDias := 0
+    Local cColM := ""
+    Local cAcao, jAndaime
+    Local nColuna, nColSolicitante, nColCentroCusto, aTamCol
+    Local cItemContrato
+    Local cQueryDataD
+    Local cQueryDataM
+    Local nCuba 
+    Local cCenCust
+    Local nPreco := 0
+    Local lValidacaoDesmontagem 
+    Local cDecode := ""
+
+    If oExcel == Nil
+        FWAlertError("Objeto oExcel não inicializado.", "Erro")
+        Return .F.
+    EndIf
+
+    // Obtém os dados atráves das colunas indicadas 
+    cSM := oExcel:GetValue(aLinha, 1) // Coluna A
+    cItemContrato := oExcel:GetValue(aLinha, 9) // Coluna I
+    nComprimento := oExcel:GetValue(aLinha, 11) // Coluna K
+    nCubagem := oExcel:GetValue(aLinha, 15) // Coluna O
+    cColM := oExcel:GetValue(aLinha, 16) // Coluna P
+
+    // Tratamento data L
+    dDataM1 := dDataMontagem
+
+    // Trata os dados para chegar na query da maneira esperada
+    If Valtype(cSM) == "U"
+        cSM := Transform(cSM, "@R 99999999")
+    Endif 
+    
+    //Decodifica fonte UTF8
+    If Valtype(cColM) == "C"
+        cDecode := DecodeUTF8(cColM, "cp1252") 
+    Endif
+
+    // Trata se cubagem for objeto
+    if Valtype(nCubagem) == "O"
+        nCuba1 := nCubagem:NNUMERO
+        nCuba2 := str(nCuba1)
+        nCuba := ALLTRIM(nCuba2)
+    Else 
+        nCuba := ALLTRIM(cValtoChar(nCubagem))
+    Endif
+
+    If Valtype(cSM) == "C"
+        cSM := Substr(cSM, 1, 11)
+    EndIf
+    
+    cPreco := Alltrim(Transform(nPreco, "@N"))
+    
+    cItem := ALLTRIM(cValtoChar(cItemContrato))
+    cColMEspaco := ALLTRIM(cDecode)
+
+    nDias := 0
+    cAcao := ""
+    cTotal := Alltrim(Transform(nDias, "@N"))
+
+    //TODO passar isso pra fora do loop
+    aTamCol := oExcel:ColTam(2)
+    For nColuna := 1 to aTamCol[2]
+        cCabecalho := oExcel:GetValue(2, nColuna)
+        If ValType(cCabecalho) == "C" .and. !Empty(cCabecalho)
+            If cCabecalho == "Solicitante"
+                nColSolicitante := nColuna
+            ElseIf cCabecalho == "Centro de Custo"
+                nColCentroCusto := nColuna
+            EndIf
+            If nColSolicitante > 0 .and. nColCentroCusto > 0
+                Exit
+            EndIf
+        EndIf
+    Next
+
+    // Verifica se as colunas foram encontradas
+    If ValType(nColSolicitante) != "N" .or. nColSolicitante == 0 .or. ValType(nColCentroCusto) != "N" .or. nColCentroCusto == 0
+        FWAlertError("Colunas 'Solicitante' ou 'Centro de Custo' não encontradas", "Erro na Validação!")
+        Return .F.
+    EndIf
+
+    cSolicitante := oExcel:GetValue(aLinha, jPosColunas["SOLICITANTE"]) // Coluna D
+    nCC := oExcel:GetValue(aLinha, nColCentroCusto) // Coluna F
+    cCenCust := ALLTRIM(cValtoChar(nCC))
+
+    If Valtype(dDataMontagem) != "D"
+        dDataMontagem := date(dDataMontagem)
+    Endif
+
+    If Valtype(dDataDesmontagem) != "D"
+        dDataDesmontagem := date(dDataDesmontagem)
+    Endif
+
+     //Valida 'ACAO' de  'M' e 'L'
+    lValidacaoMontagem := (dDataMontagem >= dDataIni .AND. dDataMontagem <= dDataFin) .AND. (Valtype(dDataDesmontagem) == "D" .OR. ValType(dDataDesmontagemObj) == "U")
+    lValidacaoLivre := (dDataMontagem <= dDataFin) .AND. (Empty(dDataDesmontagem) .OR. (dDataDesmontagem >= dDataIni .AND. dDataDesmontagem <= dDataFin) .OR. (dDataDesmontagem >= dDataFin))
+    
+    // Faz a validação de DESMONTAGEM somente se dDataDesmontagem estiver preenchido
+    If !Empty(dDataDesmontagem)
+         lValidacaoDesmontagem := (dDataDesmontagem >= dDataIni .AND. dDataDesmontagem <= dDataFin) 
+    Endif
+
+    //Valida ACAO 'HH' e 'LINHA DE VIDA '
+    lValidaHH := (cColMEspaco == "HH") .AND. (((dDataMontagem >= dDataIni .AND. dDataMontagem <= dDataFin)) .OR. ((dDataDesmontagem >= dDataIni .AND. dDataDesmontagem <= dDataFin)))
+    lValidaLinhaDeVida := (cColMEspaco == "LINHA DE VIDA") .AND. (((dDataMontagem >= dDataIni .AND. dDataMontagem <= dDataFin)) .OR. ((dDataDesmontagem >= dDataIni .AND. dDataDesmontagem <= dDataFin)))
+       
+    //Valida 'PISO EXTRA' e 'RODAPÉ'
+    lValidaPisoExtra := (cColMEspaco == "PISO EXTRA") .AND. (((dDataMontagem >= dDataIni .AND. dDataMontagem <= dDataFin)) .OR. ((dDataDesmontagem >= dDataIni .AND. dDataDesmontagem <= dDataFin)))
+    lValidaRodape := (cColMEspaco == "RODAPÉ") .AND. (((dDataMontagem >= dDataIni .AND. dDataMontagem <= dDataFin)) .OR. ((dDataDesmontagem >= dDataIni .AND. dDataDesmontagem <= dDataFin)))
+
+    /***************************************************************************************************/
+    /**  Prepara o objeto andaime para inclucao
+    /***************************************************************************************************/
+    jAndaime := JsonObject():New()
+    jAndaime["SM"]           := cSM
+    jAndaime["CC"]           :=  cCenCust
+    jAndaime["SOLICITANTE"]  :=  cSolicitante
+    jAndaime["DESCRI"]       :=  oExcel:GetValue(aLinha, jPosColunas["DESCRICAO"])
+    jAndaime["ITEM"]         :=  cItem
+    jAndaime["PRECO"]        :=  cPreco
+    jAndaime["TOTAL"]        :=  cTotal
+
+    // Se coluna 'P' conter 'HH'
+    If lValidaHH
+        cAcao := "H" 
+        nCuba := nCuba
+        cDias := Alltrim(Transform(nDias, "@N"))
+        If Empty(dDataDesmontagemObj)
+            dDataDesmontagem := dDataFin
+        Endif
+        cQueryDataM := FormatDate(dDataMontagem) 
+        cQueryDataD := FormatDate(dDataDesmontagem)
+        InsertPMV( jAndaime, cAcao, cDias, nCuba, cQueryDataM, cQueryDataD, aLinha )
+        lValidacaoMontagem := .F.
+        
+    // Se coluna 'P' conter 'LINHA DE VIDA'.
+    Elseif lValidaLinhaDeVida
+        cAcao := "V"
+        cComprimento := ALLTRIM(cValtoChar(nComprimento))
+        If At(",", cComprimento) > 0
+            cComprimento := StrTran(cComprimento, ",", ".")
+        EndIf
+        nCuba := cComprimento
+        cDias := Alltrim(Transform(nDias, "@N"))
+        cQueryDataM := FormatDate(dDataMontagem) 
+        cQueryDataD := FormatDate(dDataDesmontagem) 
+        InsertPMV( jAndaime, cAcao, cDias, nCuba, cQueryDataM, cQueryDataD, aLinha )
+        lValidacaoMontagem := .F. 
+    
+    // Se coluna 'P' conter 'PISO EXTRA'.
+    Elseif lValidaPisoExtra
+        If cItem == "08" .OR. cItem == "11"
+            If Empty(dDataDesmontagem) .OR. dDataDesmontagem == NIL
+                dDataDesmontagem := dDataFin
+            Endif
+            cAcao := "M"
+            cDias := Alltrim(Transform(nDias, "@N"))
+            cQueryDataM := FormatDate(dDataMontagem) 
+            cQueryDataD := FormatDate(dDataDesmontagem) 
+            InsertPMV( jAndaime, cAcao, cDias, nCuba, cQueryDataM, cQueryDataD, aLinha )
+        
+        Elseif cItem == "09" .OR. cItem == "12"
+            cAcao := "D"
+            cDias := Alltrim(Transform(nDias, "@N"))
+            cQueryDataM := FormatDate(dDataMontagem) 
+            cQueryDataD := FormatDate(dDataDesmontagem) 
+            InsertPMV( jAndaime, cAcao, cDias, nCuba, cQueryDataM, cQueryDataD, aLinha )
+       
+        Elseif cItem == "10" .OR. cItem == "13"
+            If Empty(dDataDesmontagem) 
+                dDataDesmontagem := dDataFin
+            Endif
+
+            If dDataMontagem < dDataIni
+                dDataMontagem := dDataIni
+            Endif
+
+            If dDataM1 < dDataIni
+                nDias := (dDataDesmontagem - dDataMontagem + 1) 
+            Else
+                nDias := (dDataDesmontagem - dDataMontagem) 
+            Endif
+
+            cDias := Alltrim(Transform(nDias, "@N"))
+            cAcao := "L"
+            cQueryDataM := FormatDate(dDataMontagem)
+            cQueryDataD := FormatDate(dDataDesmontagem)
+            InsertPMV( jAndaime, cAcao, cDias, nCuba, cQueryDataM, cQueryDataD, aLinha )
+        Endif
+    
+    // Se coluna 'P' conter 'RODAPÉ'.
+    Elseif lValidaRodape
+        If cItem == "08" .OR. cItem == "11"
+            If Empty(dDataDesmontagemObj)
+                dDataDesmontagem := dDataFin
+            Endif
+            cAcao := "M"
+            cDias := Alltrim(Transform(nDias, "@N"))
+            cQueryDataM := FormatDate(dDataMontagem) 
+            cQueryDataD := FormatDate(dDataDesmontagem) 
+            InsertPMV( jAndaime, cAcao, cDias, nCuba, cQueryDataM, cQueryDataD, aLinha )
+        
+        Elseif cItem == "09" .OR. cItem == "12"
+            cAcao := "D"
+            cDias := Alltrim(Transform(nDias, "@N"))
+            cQueryDataM := FormatDate(dDataMontagem) 
+            cQueryDataD := FormatDate(dDataDesmontagem) 
+            InsertPMV( jAndaime, cAcao, cDias, nCuba, cQueryDataM, cQueryDataD, aLinha )
+       
+        Elseif cItem == "10" .OR. cItem == "13"
+            If dDataDesmontagemObj == NIL .OR. Empty(dDataDesmontagem) .OR. dDataDesmontagem > dDataFin
+                dDataDesmontagem := dDataFin
+            Endif
+            
+            If dDataMontagem < dDataIni
+                dDataMontagem := dDataIni
+            Endif
+
+            If dDataM1 < dDataIni
+                nDias := (dDataDesmontagem - dDataMontagem + 1) 
+            Else
+                nDias := (dDataDesmontagem - dDataMontagem) 
+            Endif
+
+            cDias := Alltrim(Transform(nDias, "@N"))
+            cAcao := "L"
+            cQueryDataM := FormatDate(dDataMontagem)
+            cQueryDataD := FormatDate(dDataDesmontagem)
+            InsertPMV( jAndaime, cAcao, cDias, nCuba, cQueryDataM, cQueryDataD, aLinha)
+        Endif
+    Elseif Empty(cColMEspaco)
+        Return
+    Endif
+
+    // Verfica as condições para coluna ACAO
+    While lValidacaoMontagem .OR. lValidacaoDesmontagem .OR. lValidacaoLivre
+        If lValidaHH == .T.
+            Return
+        Endif
+            If lValidacaoMontagem
+                If Empty(dDataDesmontagemObj)
+                    dDataDesmontagem := dDataFin
+                Endif
+                cAcao := "M" 
+                cDias := Alltrim(Transform(nDias, "@N"))
+                cQueryDataM := FormatDate(dDataMontagem) 
+                cQueryDataD := FormatDate(dDataDesmontagem) 
+                InsertPMV( jAndaime, cAcao, cDias, nCuba, cQueryDataM, cQueryDataD, aLinha )
+                lValidacaoMontagem := .F.
+            Endif
+            
+            If lValidacaoDesmontagem
+                cAcao := "D"
+                cDias := Alltrim(Transform(nDias, "@N"))
+                cQueryDataM := FormatDate(dDataMontagem) 
+                cQueryDataD := FormatDate(dDataDesmontagem)
+                InsertPMV( jAndaime, cAcao, cDias, nCuba, cQueryDataM, cQueryDataD, aLinha )
+                lValidacaoDesmontagem := .F.
+            Endif
+
+            If lValidacaoLivre
+
+                If dDataMontagem < dDataIni
+                    dDataMontagem := dDataIni
+                Endif
+
+                If Empty(dDataDesmontagem) .OR. dDataDesmontagem > dDataFin
+                    dDataDesmontagem := dDataFin
+                Endif
+
+                If dDataM1 < dDataIni
+                    nDias := (dDataDesmontagem - dDataMontagem + 1) 
+                Else
+                    nDias := (dDataDesmontagem - dDataMontagem) 
+                Endif
+
+                cDias := Alltrim(Transform(nDias, "@N"))
+                cAcao := "L"
+                cQueryDataM := FormatDate(dDataMontagem)
+                cQueryDataD := FormatDate(dDataDesmontagem)
+                InsertPMV( jAndaime, cAcao, cDias, nCuba, cQueryDataM, cQueryDataD, aLinha )
+                lValidacaoLivre := .F.
+            Endif
+            
+        If !lValidacaoMontagem .AND. !lValidacaoDesmontagem .AND. !lValidacaoLivre
+            Exit
+        Endif
+    EndDo
+Return .T.
+
+//--------------------------
+// Formata a data no formato yyyymmdd. 
+//--------------------------
+Static Function FormatDate(dDate)
+   Local cFormattedDate := ""
+    Local nYear := 0
+    Local nMonth := 0
+    Local nDay := 0
+
+    if ValType(dDate) != "D"
+        dDate := Date(dDate) 
+    Endif
+
+    If ValType(dDate) == "D"
+        // Obtm o ano, ms e dia da data 
+        nYear := Year(dDate)
+        nMonth := Month(dDate)
+        nDay := Day(dDate)
+        
+        // Se o ano  menor que 100, ajusta para o formato yyyy
+        If nYear < 100
+            nYear := nYear + 2000
+        Endif
+
+        // Converte os valores para strings com zeros  esquerda
+        cYear := SubStr("0000" + LTrim(Str(nYear)), -4, 4)
+        cMonth := SubStr("00" + LTrim(Str(nMonth)), -2, 2)
+        cDay := SubStr("00" + LTrim(Str(nDay)), -2, 2)
+        
+        cFormattedDate := cYear + cMonth + cDay
+
+        // Retorna a data no formato yyyymmdd 
+        Return cFormattedDate
+    Else
+        // Se no for uma data vlida, retorna "NULL"
+        Return "NULL"
+    Endif
+Return
+
+//--------------------------
+// Query insert PAN MOV ANDAIME.
+//--------------------------
+Static Function InsertPMV( jAndaime, cAcao, cDias, nCuba, cQueryDataM, cQueryDataD, aLinha)
+    Local cQuery  := ""
+
+    TableClean()
+
+    cQuery := "INSERT INTO PAN_MOV_ANDAIME ("
+    cQuery += "SM, CUBAGEM, DATA_MONTA, DATA_DESMONTA, ITEM, SOLICITANTE, PRECO, TOTAL, CC, ACAO, DESCRI, DIAS ) "
+    cQuery += "VALUES ('" + Alltrim (jAndaime["SM"] ) + "', "                                        
+    cQuery += "'" + nCuba + "', "               
+    cQuery += "'" + cQueryDataM + "', "     
+    cQuery += "'" + cQueryDataD + "', "   
+    cQuery += "'" + jAndaime["ITEM"] + "', "                                      
+    cQuery += "'" + jAndaime["SOLICITANTE"] + "', "                                
+    cQuery += jAndaime["PRECO"] + ", "                        
+    cQuery += jAndaime["TOTAL"] + ", "                          
+    cQuery += "'" + jAndaime["CC"] + "', "                           
+    cQuery += "'" + cAcao + "', "                                      
+    cQuery += "'" + Substr ( jAndaime["DESCRI"], 1, 50 ) + "', "      
+    cQuery += cDias + ")"  
+
+    If TCSQLExec(cQuery) != 0
+        FWAlertInfo("Query não validada!")
+        KTXLOG():log ( "medicao_andaimes.log", cQuery , .T. , .T. )
+        Return .F.
+    Else
+        cSuccessCount += 1  
+    Endif
+Return
+
+//--------------------------
+// Executa a Procedure.
+//--------------------------
+Static Function InsertProQuery(cCodIntValor)
+    Local cQuery  := ""
+
+    cQuery := "call ireport_mod_sigamnt.recalcula_medicao_andaimes('"+cCodIntValor+"')"
+
+    If TCSQLExec(cQuery) != 0
+        FWAlertInfo("Query não validada!")
+        KTXLOG():log ( "medicao_andaimes.log", cQuery , .T. , .T. )
+        Return .F.
+    EndIf
+    fLog() 
+Return
+
+//--------------------------
+// Apaga registro de importações anteriores.
+//--------------------------
+Static Function TableClean()
+    If !lTableCleaned
+        cQuery1 := "DELETE FROM PAN_MOV_ANDAIME"
+        If TCSQLExec(cQuery1) == 0
+            lTableCleaned = .T.  // Marca que a tabela foi limpa
+        Else
+            FWAlertError("Não foi possível limpar a tabela PAN_MOV_ANDAIME.", "Erro")
+            KTXLOG():log ( "medicao_andaimes.log", cQuery1 , .T. , .T. )
+        Endif
+    Endif
+Return
+
+//--------------------------
+// Gera Logs.
+//--------------------------
+Static Function fLog() 
+    Local dimAltura     :=  600
+    Local dimLargura    :=  1000
+    Local cxMemoCalculo
+    Local cQuery, bQuery
+    Local aRes, aResTotal
+    Local nResMontagem, nResDesmontagem, nResLocacao, nResHH, nResVida
+    Local nIndex
+    Local cClassif, nTotal
+
+    nResMontagem := 0
+    nResDesmontagem := 0
+    nResLocacao := 0
+    nResHH := 0
+    nResVida := 0
+
+    Define Font oFont Name "Mono AS" Size 8, 14
+    Define MsDialog oDlgx Title "Atualização Concluída." From 3, 0 to dimAltura, dimLargura Pixel
+
+    // Definir a consulta para classificação e total
+    cQuery := "SELECT CLASSIF, SUM(TOTAL) AS TOTAL "
+    cQuery += "FROM ( "
+    cQuery += "  SELECT CASE "
+    cQuery += "    WHEN ACAO = 'M' THEN 'MONTAGEM' "
+    cQuery += "    WHEN ACAO = 'H' THEN 'HH' "
+    cQuery += "    WHEN ACAO = 'D' THEN 'DESMONTAGEM' "
+    cQuery += "    WHEN ACAO = 'L' THEN 'LOCACAO' "
+    cQuery += "    WHEN ACAO = 'V' THEN 'LINHA DE VIDA' "
+    cQuery += "  END AS CLASSIF, "
+    cQuery += "  TOTAL, "
+    cQuery += "  CASE "
+    cQuery += "    WHEN ACAO = 'H' THEN 90 "
+    cQuery += "    WHEN ACAO = 'M' THEN 11 "
+    cQuery += "    WHEN ACAO = 'D' THEN 12 "
+    cQuery += "    WHEN ACAO = 'L' THEN 15 "
+    cQuery += "    WHEN ACAO = 'V' THEN 98 "
+    cQuery += "  END AS ORDEM "
+    cQuery += "  FROM PAN_MOV_ANDAIME "
+    cQuery += ") GROUP BY CLASSIF, ORDEM "
+    cQuery += "ORDER BY ORDEM"
+
+    // Executar a primeira consulta e armazenar o resultado
+    TCSQLExec(cQuery)
+    aRes := QryArray(cQuery)
+
+    If Len(aRes) == 0
+        MsgInfo("Nenhum dado retornado pela consulta.")
+        Return
+    EndIf
+
+    If Len(aRes) > 0
+        For nIndex := 1 To Len(aRes)
+            cClassif := ALLTRIM(aRes[nIndex][1])
+            nTotal := aRes[nIndex][2]
+
+            // Atualizar variáveis com base na classificação
+            If cClassif == "MONTAGEM"
+                nResMontagem := nTotal
+            ElseIf cClassif == "DESMONTAGEM"
+                nResDesmontagem := nTotal
+            ElseIf cClassif == "LOCACAO"
+                nResLocacao := nTotal
+            ElseIf cClassif == "HH"
+                nResHH := nTotal
+            ElseIf cClassif == "LINHA DE VIDA"
+                nResVida := nTotal
+            EndIf   
+        Next
+    EndIf
+
+    bQuery := "SELECT SUM(TOTAL) AS TotalSum FROM PAN_MOV_ANDAIME"
+
+    TCSQLExec(bQuery)
+
+    aResTotal := QryArray(bQuery)
+    
+    If Len(aResTotal) > 0
+        nResTotal := aResTotal[1][1]
+    Else
+        nResTotal := 0
+    EndIf
+
+    cxMemoCalculo := "Total Montagem: "
+    cxMemoCalculo += PadL(Transform(nResMontagem, "@E 999,999,999.99"), 61, " ") + Chr(13) + Chr(10)
+    cxMemoCalculo += "Total Desmontagem: "
+    cxMemoCalculo += PadL(Transform(nResDesmontagem, "@E 999,999,999.99"), 58, " ") + Chr(13) + Chr(10)
+    cxMemoCalculo += "Total Locação: "
+    cxMemoCalculo += PadL(Transform(nResLocacao, "@E 999,999,999.99"), 62, " ") + Chr(13) + Chr(10)
+    cxMemoCalculo += "Total HH: "
+    cxMemoCalculo += PadL(Transform(nResHH, "@E 999,999,999.99"), 67, " ") + Chr(13) + Chr(10)
+    cxMemoCalculo += "Total Linha de Vida: "
+    cxMemoCalculo += PadL(Transform(nResVida, "@E 999,999,999.99"), 56, " ") + Chr(13) + Chr(10)
+    cxMemoCalculo += "Soma Coluna: "
+    cxMemoCalculo += PadL(Transform(nResTotal, "@E 999,999,999.99"), 64, " ") + Chr(13) + Chr(10)
+
+    @ 5, 5 Get oMemo Var cxMemoCalculo Memo Size dimLargura*0.45, dimAltura*0.35 Of oDlgx Pixel
+    oMemo:bRClicked := { || AllwaysTrue() }
+    oMemo:oFont := oFont
+
+    Define SButton From 500, 300 Type 1 Action oDlgx:End() Enable Of oDlgx Pixel
+
+    Activate MsDialog oDlgx Center
+
+    AbrirURL()
+Return
+
+//--------------------------
+// Verifica os campos e finaliza a importação
+//--------------------------
+Static Function ConcluiImportacao(aLinha, oExcel, dDataIni, dDataFin, dDataMontagem, dDataDesmontagem, cSuccessCount, cCodIntValor)
+
+    Local cFicha
+
+    Ficha := oExcel:GetValue(aLinha, 1)
+
+    // Verifica se as próximas linhas estão em branco e conclui a importação
+    If Empty(cFicha)
+        FWAlertSuccess("A importação foi realizada com êxito e os dados foram integrados corretamente, Número de registros inseridos: "+ cValtoChar(cSuccessCount) + " , Importação concluída com sucesso!")
+        InsertProQuery(cCodIntValor)
+        Qry->(DbCloseArea())
+        lTableCleaned = .F.
+        cSuccessCount := 0
+        oExcel:Close()
+        Return .F.
+    EndIf
+
+//--------------------------a
+// Resultados
+//--------------------------
+Static Function AbrirURL()
+
+    Local cLink := OxWeb():GetHyperlink( "SMARTVIEW", "MNT_VISAO_ANDAIMES_MEDICAO" )
+    ShellExecute("Open", cLink, "", "", 1)
+
+Return

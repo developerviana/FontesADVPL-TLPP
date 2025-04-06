@@ -2,6 +2,13 @@
 #INCLUDE 'Parmtype.ch'
 #INCLUDE 'FWMVCDef.ch'
 
+/*------------------------------------------------------------------------//
+//Programa:	 CADSZ5
+//Autor:	 Victor Lucas
+//Data:		 03/04/2025
+//Descricao: Contabilidade Gerencial.
+//------------------------------------------------------------------------*/
+
 User function CADSZ5()
 
     Local oBrowse := Nil
@@ -13,7 +20,7 @@ User function CADSZ5()
     oBrowse := FWMBrowse():New()
 
     oBrowse:SetAlias("SZ5")
-    oBrowse:SetDescription("SZ5 - Contabilidade Gerencial")
+    oBrowse:SetDescription("SZ5 - ContabiliWdade Gerencial")
     oBrowse:Activate()
 Return(Nil) 
 
@@ -25,6 +32,7 @@ Static Function MenuDef()
     ADD OPTION aRotina TITLE 'Incluir'    ACTION 'VIEWDEF.CADSZ5' OPERATION 3 ACCESS 0
 	ADD OPTION aRotina TITLE 'Alterar'    ACTION 'VIEWDEF.CADSZ5' OPERATION 4 ACCESS 0
 	ADD OPTION aRotina TITLE 'Excluir'    ACTION 'VIEWDEF.CADSZ5' OPERATION 5 ACCESS 0
+    ADD OPTION aRotina TITLE 'Importação' ACTION 'U_ImportaSZ5'   OPERATION 3 ACCESS 0
     
 Return aRotina
 
@@ -39,7 +47,7 @@ Static Function ModelDef()
 
     oModel:AddFields("ModelSZ5",/*cOwner*/,oStMaster)
 
-    oModel:SetPrimaryKey( {'SZ5_PROD'} )
+    oModel:SetPrimaryKey( {'Z5_FILIAL'} )
 Return oModel
 
 Static Function ViewDef()
@@ -53,7 +61,9 @@ Static Function ViewDef()
 
     oView:SetModel(oModel)
 
-    oStMaster:SetProperty("SZ5_PROD", MVC_VIEW_LOOKUP, {|| cConsulta := "SB1"})
+    oStMaster:SetProperty("Z5_CC", MVC_VIEW_LOOKUP, {|| cConsulta := "CTT"})
+    oStMaster:SetProperty("Z5_ITEMCON", MVC_VIEW_LOOKUP, {|| cConsulta := "CT1"})
+    oStMaster:SetProperty("Z5_CVALOR", MVC_VIEW_LOOKUP, {|| cConsulta := "CCL"})
 
     oView:AddField("ViewSZ5", oStMaster, "ModelSZ5")
    

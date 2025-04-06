@@ -5,6 +5,7 @@ Thumbs.db
 # Ignorar diretórios de build
 /build/
 /dist/
+/testes/
 
 # Ignorar arquivos de configuração do sistema operacional
 *.swp

@@ -1,0 +1,342 @@
+#INCLUDE "PROTHEUS.CH" 
+#INCLUDE "RWMAKE.CH"
+#Include "TBICONN.CH"
+#INCLUDE "TOPCONN.CH"
+#INCLUDE "TOTVS.CH"
+
+/*------------------------------------------------------------------------//
+//Programa:	 IMPORTASZ5
+//Autor:	 Victor Lucas
+//Data:		 23/09/2024
+//Descricao: Importação de Contabilidade Gerencial.
+//------------------------------------------------------------------------*/
+
+User Function IMPORTASZ5()
+    Local cTexto
+    Local bConfirm
+    Local bSair
+
+    Local oDialog
+    Local oContainer
+    Public cSuccessCount := 0
+    Public lTableCleaned := .F.
+
+    Private cPlanilha  := ""
+    Public oExcel 
+    Private aOpcoes := {}
+    Private cAbas := ""
+    Private dDataIni := sToD("")
+    Private dDataFin := sToD("")
+     
+    Private oTGet1
+    Private oTGet2
+    Private oTButton1
+
+    bConfirm := {|| FwMsgRun(,{|oSay| ImportaPlanilha(oContainer, aOpcoes), NIL}, 'Buscando Planilha ... ', "",) }
+    bSair := {|| Iif(MsgYesNo('Você tem certeza que deseja sair da rotina?', 'Sair da rotina'), (oDialog:DeActivate()), NIL) }
+
+    oDialog := FWDialogModal():New()
+
+    oDialog:SetBackground(.T.)
+    oDialog:SetTitle('Importação da Planilha de Solicitações')
+    oDialog:SetSize(220, 360) 
+    oDialog:EnableFormBar(.T.)
+    oDialog:SetCloseButton(.F.)
+    oDialog:SetEscClose(.F.)  
+    oDialog:CreateDialog()
+    oDialog:CreateFormBar()
+    oDialog:AddButton('Importar', bConfirm, 'Confirmar', , .T., .F., .T.)
+    oDialog:AddButton('Sair', bSair, 'Sair', , .T., .F., .T.)
+    
+    oContainer := TPanel():New( ,,, oDialog:getPanelMain() )
+    oContainer:Align := CONTROL_ALIGN_ALLCLIENT
+
+    cTexto := '• Programa de importação da Planilha de Solicitações'
+
+    oSay2 := TSay():New(010,010,{||cTexto},oContainer,,,,,,.T.,,,800,20)
+
+    // Adiciona campos para selecionar a planilha
+    oSay1 := TSay():New(035,010,{||'Selecione a Planilha:'},oContainer,,,,,,.T.,,,100,9)
+    oTGet0 := tGet():New(045,010,{|u| if(PCount()>0,cPlanilha:=u,cPlanilha)},oContainer ,180,9,"",,,,,,,.T.,,, {|| .T. } ,,,,.F.,,,"cPlanilha")
+
+    // Função chamada para selecionar a planilha e obter pastas *
+    oTButton1 := TButton():New(045, 200, "Selecionar..." ,oContainer,{|| (cPlanilha:=cGetFile("Arquivos Excel | *.xls*",OemToAnsi("Selecione Diretorio"),,"",.F.,GETF_LOCALHARD+GETF_NETWORKDRIVE,.F.)), FwMsgRun(,{|oSay|PegaAbas(oSay)},'Buscando Planilhas ... ',"",) } , 50,10,,,.F.,.T.,.F.,,.F.,,,.F. )
+
+    // Adiciona campos para selecionar a aba
+    oSay5 := TSay():New(065,010,{||'Selecione uma aba da planilha: '},oContainer,,,,,,.T.,,,100,9)
+    oCombo1 := TComboBox():New(075,010,{|u|if(PCount()>0,cAbas:=u,cAbas)},aOpcoes,100,9,oContainer,,,,,,.T.,,,,,,,,,'cAbas')    
+
+    oDialog:Activate()
+Return
+
+//--------------------------
+// Função para extrair as abas da planilha.
+//--------------------------
+Static Function PegaAbas(oSay)
+    Local nContP
+
+    oExcel := YExcel():new(, cPlanilha)
+    oExcel:OpenRead(cPlanilha)
+
+    aOpcoes := {}
+    For nContP := 1 to oExcel:LenPlanAt()
+        oExcel:SetPlanAt(nContP)
+        AADD(aOpcoes, ALLTRIM(STR(nContP) + ' - ' + EncodeUtf8(oExcel:GetPlanAt("2"))))
+    Next
+
+    If Len(aOpcoes) > 0
+        cAbas := aOpcoes[1]
+        oCombo1:SetItems(aOpcoes)
+        oCombo1:Refresh()
+    Else
+        FWAlertError("Nenhuma aba encontrada na planilha. Verifique o arquivo e tente novamente.", "Erro")
+        Return
+    EndIf
+
+
+Return aOpcoes
+
+//----------------------------------------
+// Verificar se a planilha foi selecionada.
+//----------------------------------------
+Static Function ImportaPlanilha(oContainer, aOpcoes)
+    Local lRet := .T.
+
+    If Empty(cPlanilha)
+        If oExcel != Nil
+            oExcel:Close()
+        EndIf
+        FWAlertInfo("Por favor, informe a planilha antes de continuar.", "Nenhuma planilha selecionada!")
+        lRet := .F.
+    EndIf
+
+    If lRet
+        If FWAlertNoYes("Confirma a importação com os dados informados?", "Importação")
+            lRet := .T.
+            If lRet
+                FwMsgRun(,{|oSay| lRet := ProcessarDados(oContainer, aOpcoes)}, 'Validando dados da Planilha. Aguarde ... ', "",)
+            EndIf
+        Else
+            lRet := .F.
+        EndIf
+    EndIf
+
+Return lRet
+//----------------------------------------
+// Função para processar e importar dados
+//----------------------------------------
+Static Function ProcessarDados(oContainer, aOpcoes)
+    
+    Local oExcel      := Nil
+    Local nLin        := 0
+    Local nTotLin     := 0
+    Local aLista  := {} 
+    Local oJson
+    Local cProjeto
+    Local jColunas := JsonObject():New()
+
+    // Abre a planilha e define a aba selecionada
+    oExcel := YExcel():New(, cPlanilha)
+    oExcel:OpenRead(cPlanilha)
+    oExcel:SetPlanAt(oCombo1:nAt)
+
+    // Obter número total de linhas
+    nTotLin := oExcel:LinTam()
+
+    // verifica o cabecalho da planilha
+    If !ValidaCabecalho(oExcel, @jColunas)
+        Return Nil
+    EndIf
+
+    For nLin := 3 To nTotLin[2] 
+
+       
+        oJson := JsonObject():New()
+
+        // Ler a coluna do "PROJETO" para verificar se está em branco
+        cProjeto := oExcel:GetValue(nLin, jColunas['POS_PROJETO'] )
+
+        If Empty(cProjeto)
+            Exit
+        EndIf
+
+        // Verifica se o tipo do valor não é numérico
+        nQuanti := oExcel:GetValue(nLin, jColunas['POS_QTD'] )
+        
+        If ValType(nQuanti) != "N"
+            nQuanti := Val(nQuanti)
+        EndIf 
+
+        // Ler os dados das colunas especificadas
+        oJson['PRODUTO']          := oExcel:GetValue(nLin,  jColunas['POS_PRODUTO'] ) // Coluna O
+        oJson['CC']               := oExcel:GetValue(nLin,  jColunas['POS_CC']) // Coluna Q
+        oJson['PROJETO']          := oExcel:GetValue(nLin,  jColunas['POS_PROJETO'] ) // Coluna R
+        oJson['CLASSE']           := oExcel:GetValue(nLin,  jColunas['POS_CL']) // Coluna S
+        oJson['BP']               := oExcel:GetValue(nLin,  jColunas['POS_BP']) // Coluna T
+        oJson['CT']               := oExcel:GetValue(nLin,  jColunas['POS_CT']) // Coluna U
+        oJson['Q']                := nQuanti // Coluna M
+        oJson['ENTREGA']          := oExcel:GetValue(nLin,  jColunas['POS_NECESSIDADE'])  // Coluna I
+        oJson['LINHA']            := nLin  // Linha
+
+        // Exibir informações do objeto JSON no console
+        VarInfo("oJson", oJson) // Comando para visualizar os dados no console
+
+        // Adiciona o objeto JSON ao array
+        AADD(aLista, oJson)
+    Next
+
+    FinalizaImport(oExcel, nLin, aLista)
+
+Return aLista
+//----------------------------------------
+// Verificar se a importao deve ser concluda
+//----------------------------------------
+Static Function FinalizaImport(oExcel, nLin, aLista)
+
+    oColL := oExcel:GetValue(nLin, 12) // Coluna L 
+    oColQ := oExcel:GetValue(nLin, 17) // Coluna Q 
+    oColR := oExcel:GetValue(nLin, 18) // Coluna R 
+    oColS := oExcel:GetValue(nLin, 19) // Coluna S
+
+    // Verifica se as colunas L, Q, R e S esto vazias
+    If Empty(oColL) .And. Empty(oColQ) .And. Empty(oColR) .And. Empty(oColS)
+        xoMontagem := OxSolicitacaoMontagem():Create ( aLista )
+        xoMontagem:Executa()
+            
+        If xoMontagem:AnalisaMemoriaCalculo()
+            xoMontagem:RegistraSolicitacoes()
+            FWAlertSuccess("Importao concluda com sucesso!", "Importao Finalizada!")
+            If ValType(oExcel) == "O"  
+                oExcel:Close()
+                Return
+            Endif
+        Else
+            xoMontagem:MostraErros()
+            FWAlertError("Importao no realizada!", "Erro!")
+            If ValType(oExcel) == "O"  
+                oExcel:Close()
+                Return
+            Endif
+        Endif
+    EndIf  
+
+Return .F.
+
+//----------------------------------------
+// Faz as validações colunas Q, R e S
+//----------------------------------------
+Static Function ValidaQRS(oExcel, nLin)
+    Local cQ := oExcel:GetValue(nLin, 17) // Leitura da célula Q
+    Local cR := oExcel:GetValue(nLin, 18) // Leitura da célula R
+    Local cS := oExcel:GetValue(nLin, 19) // Leitura da célula S
+
+    // Verifica se alguma das colunas está em branco
+    If Empty(cQ) .Or. Empty(cR) .Or. Empty(cS)
+        MsgStop("Registro da linha " + AllTrim(Str(nLin)) + " contém dados essenciais em branco (centro, item ou classe de valor).", "Erro de Validação")
+        If ValType(oExcel) == "O"  
+            oExcel:Close()
+            Return
+        Endif
+    EndIf
+
+Return
+
+//----------------------------------------
+// Verifica se o cabeçalho da planilha está correto
+//----------------------------------------
+Static Function ValidaCabecalho( oExcel, jColunas )
+    Local cCabecalhoMontik
+    Local cCabecalhoKatrium
+    Local nTotalColunas
+    Local nColuna
+    Local lMontikEncontrado := .F.
+    Local lKatriumEncontrado := .F.
+    Local cValorCelula
+    Local cValorFormatado
+    Local lRet := .T.
+
+    cCabecalhoMontik := "PREENCHIMENTO MONTIK"
+    cCabecalhoKatrium := "PREENCHIMENTO KATRIUM"
+
+    nLin := 1
+    nTotalColunas := oExcel:ColTam(nLin)[2]
+
+    // Percorre todas as colunas da linha
+    For nColuna := 1 To nTotalColunas
+        cValorCelula := oExcel:GetValue(nLin, nColuna)
+        cValorFormatado := cValToChar(cValorCelula)
+
+        // Verifica se a célula contém o cabeçalho esperado
+        If cValorFormatado == cCabecalhoMontik
+            lMontikEncontrado := .T.
+        EndIf
+
+        If cValorFormatado == cCabecalhoKatrium
+            lKatriumEncontrado := .T.
+        EndIf
+
+        // Se ambos os cabeçalhos forem encontrados, pode sair do loop
+        If lMontikEncontrado .And. lKatriumEncontrado
+            lRet := .T.
+            Exit
+        Endif
+    Next
+
+    // Se não encontrar nenhum dos cabeçalhos
+
+    If 1 > 2 .And. ( !lMontikEncontrado .Or. !lKatriumEncontrado )
+        FWAlertWarning("A planilha selecionada não possui as células indicadoras de Preenchimento 'PREENCHIMENTO MONTIK' ou 'PREENCHIMENTO KATRIUM'", "Não haverá processamento das informações para solicitação do packing list!") 
+        oExcel:Close()
+        lRet := .F.
+    Else 
+
+        nLin := 2
+        nTotalColunas := oExcel:ColTam(nLin)[2]
+
+        For nColuna := 1 To nTotalColunas
+           cValorCelula := oExcel:GetValue(nLin, nColuna)
+           If cValorCelula<>NIl .And. ValType(cValorCelula) == "C"
+                If Right ( cValorCelula, 8 ) == "MATERIAL"
+                    jColunas["POS_PRODUTO"] := nColuna
+                ElseIf AllTrim ( cValorCelula ) == "HGF"
+                    jColunas["POS_PROJETO"] := nColuna
+                ElseIf AllTrim ( UPPER ( cValorCelula ) ) == "C. CUSTO"
+                    jColunas["POS_CC"] := nColuna             
+                ElseIf AllTrim ( UPPER ( cValorCelula ) ) == "CL. VALOR"
+                    jColunas["POS_CL"] := nColuna  
+                ElseIf AllTrim ( UPPER ( cValorCelula ) ) == "CT"
+                    jColunas["POS_CT"] := nColuna                                                                
+                ElseIf Substr ( cValorCelula, 1, 3 ) == "QTD" .OR. cValorCelula == "QUANTIDADE"
+                    jColunas["POS_QTD"] := nColuna                    
+                ElseIf AllTrim ( cValorCelula ) == "BP"
+                    jColunas["POS_BP"] := nColuna                    
+                ElseIf AllTrim ( cValorCelula ) == "DATA DE NECESSIDADE"
+                    jColunas["POS_NECESSIDADE"] := nColuna    
+                Else 
+                    jColunas["POS_NADA"] := nColuna                    
+                EndIf
+           EndIf
+
+        Next nColuna
+
+        If !jColunas:HasProperty("POS_PRODUTO") 
+            FWAlertWarning("Não foi identificada coluna com Código do Produto", "Não haverá processamento das informações para solicitação do packing list!") 
+            oExcel:Close()
+            lRet := .F.
+        EndIf
+       If !jColunas:HasProperty("POS_NECESSIDADE") 
+            FWAlertWarning("Não foi identificada coluna com Data de Necessidade", "Não haverá processamento das informações para solicitação do packing list!") 
+            oExcel:Close()
+            lRet := .F.
+        EndIf
+       If !jColunas:HasProperty("POS_CC") .OR. !jColunas:HasProperty("POS_CL") .OR. !jColunas:HasProperty("POS_PROJETO") 
+            FWAlertWarning("Não foi identificada coluna com Centro de Custo, Classe de Valor ou Projeto", "Não haverá processamento das informações para solicitação do packing list!") 
+            oExcel:Close()
+            lRet := .F.
+        EndIf        
+        
+    EndIf
+
+Return lRet  
+
+

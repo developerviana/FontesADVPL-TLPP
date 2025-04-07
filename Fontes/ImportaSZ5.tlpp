@@ -39,7 +39,7 @@ User Function IMPORTASZ5()
 
     oDialog:SetBackground(.T.)
     oDialog:SetTitle('Importação de Contabilidade Gerencial')
-    oDialog:SetSize(200, 300) 
+    oDialog:SetSize(200, 280) 
     oDialog:EnableFormBar(.T.)
     oDialog:SetCloseButton(.F.)
     oDialog:SetEscClose(.F.)  

@@ -38,8 +38,8 @@ User Function IMPORTASZ5()
     oDialog := FWDialogModal():New()
 
     oDialog:SetBackground(.T.)
-    oDialog:SetTitle('Importação da Planilha de Solicitações')
-    oDialog:SetSize(220, 360) 
+    oDialog:SetTitle('Importação de Contabilidade Gerencial')
+    oDialog:SetSize(200, 300) 
     oDialog:EnableFormBar(.T.)
     oDialog:SetCloseButton(.F.)
     oDialog:SetEscClose(.F.)  
@@ -51,7 +51,7 @@ User Function IMPORTASZ5()
     oContainer := TPanel():New( ,,, oDialog:getPanelMain() )
     oContainer:Align := CONTROL_ALIGN_ALLCLIENT
 
-    cTexto := '• Programa de importação da Planilha de Solicitações'
+    cTexto := '• Incluir registros de contmabilidade.'
 
     oSay2 := TSay():New(010,010,{||cTexto},oContainer,,,,,,.T.,,,800,20)
 

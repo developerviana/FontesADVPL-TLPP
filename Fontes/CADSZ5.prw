@@ -20,7 +20,7 @@ User function CADSZ5()
     oBrowse := FWMBrowse():New()
 
     oBrowse:SetAlias("SZ5")
-    oBrowse:SetDescription("SZ5 - ContabiliWdade Gerencial")
+    oBrowse:SetDescription("SZ5 - Contabilidade Gerencial")
     oBrowse:Activate()
 Return(Nil) 
 

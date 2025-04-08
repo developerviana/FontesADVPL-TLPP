@@ -148,18 +148,23 @@ Static Function ProcessarDados(oContainer, aOpcoes)
 
         oJson := JsonObject():New()
 
-        oJson["BaseRequest"]     := oExcel:GetValue(nLin, 1)   // A
-        oJson["Natureza"]        := oExcel:GetValue(nLin, 2)   // B
-        oJson["Ano"]             := oExcel:GetValue(nLin, 3)   // C
-        oJson["Status"]          := oExcel:GetValue(nLin, 4)   // D
-        oJson["NomeStatus"]      := oExcel:GetValue(nLin, 5)   // E
-        oJson["ValorFinanciado"] := oExcel:GetValue(nLin, 6)   // F
-        oJson["Historico"]       := oExcel:GetValue(nLin, 7)   // G
-        oJson["FonteRecurso"]    := oExcel:GetValue(nLin, 8)   // H
-        oJson["ItemContabil"]    := oExcel:GetValue(nLin, 9)   // I
-        oJson["PO"]              := oExcel:GetValue(nLin, 10)  // J
-        oJson["Portfolio"]       := oExcel:GetValue(nLin, 11)  // K
-        oJson["CentroCusto"]     := oExcel:GetValue(nLin, 12)  // L
+        oJson["BaseRequest"]     := oExcel:GetValue(nLin, 1)                           // A
+        oJson["Natureza"]        := oExcel:GetValue(nLin, 2)                           // B
+        oJson["Ano"]             := oExcel:GetValue(nLin, 3)                           // C
+        oJson["Status"]          := Left(oExcel:GetValue(nLin, 4), 33)                // D
+        oJson["NomeStatus"]      := Left(oExcel:GetValue(nLin, 5), 33)                // E
+        oJson["ValorFinanciado"] := oExcel:GetValue(nLin, 6)                           // F
+        oJson["Historico"]       := Left(oExcel:GetValue(nLin, 7), 33)                // G
+        oJson["FonteRecurso"]    := Left(oExcel:GetValue(nLin, 8), 33)                // H
+        oJson["ItemContabil"]    := oExcel:GetValue(nLin, 9)                           // I
+        oJson["NomeItem"]        := Left(oExcel:GetValue(nLin, 10), 33)               // J
+        oJson["PO"]              := Left(oExcel:GetValue(nLin, 11), 33)               // K
+        oJson["Portfolio"]       := Left(oExcel:GetValue(nLin, 12), 33)               // L
+        oJson["CentroCusto"]     := oExcel:GetValue(nLin, 13)                          // M
+        oJson["NomeCC"]          := Left(oExcel:GetValue(nLin, 14), 33)               // N
+        oJson["ClasseValor"]     := oExcel:GetValue(nLin, 15)                          // O
+        oJson["NomeClasse"]      := Left(oExcel:GetValue(nLin, 16), 33)               // P
+
 
         oJson["LINHA"] := nLin
 
@@ -181,6 +186,7 @@ Static Function FinalizaImport(oExcel, nLin, aLista)
     Local oJson 
     Local LinTam
     Local i      := 0 
+    Local aErros 
 
     LinTam := Len(aLista)
     TableClean()
@@ -190,31 +196,40 @@ Static Function FinalizaImport(oExcel, nLin, aLista)
         oJson := aLista[i]
 
         cQuery := "INSERT INTO " + RetSqlName("SZ5") + " ("
-        cQuery += "Z5_ANO, Z5_STATUS, Z5_NSTATUS, Z5_AMOUNTI, Z5_HISTORI, Z5_FRECURS, Z5_ITEMCON, Z5_NOMEITE, Z5_PO, Z5_PORTFOL, Z5_CC, Z5_NOMECC, Z5_CVALOR, Z5_NOMECLA ) "
+        cQuery += "Z5_ANO, Z5_STATUS, Z5_NSTATUS, Z5_AMOUNTI, Z5_HISTORI, Z5_FRECURS, Z5_ITEMCON, Z5_NOMEITE, Z5_PO, Z5_PORTFOL, Z5_CC, Z5_NOMECC, Z5_CVALOR, Z5_NOMECLA, R_E_C_N_O_) "
         cQuery += "VALUES ('" +  oJson["Ano"]  + "', "                                        
         cQuery += "'" + oJson["Status"] + "', "               
         cQuery += "'" + oJson["NomeStatus"] + "', "     
         cQuery += ALLTRIM(Str(oJson["ValorFinanciado"])) + ", "   
         cQuery += "'" + oJson["Historico"] + "', "                                      
         cQuery += "'" + oJson["FonteRecurso"] + "', "                                
-        cQuery += ALLTRIM(Str(oJson["ItemContabil"])) + ", "                     
-        cQuery += "'" + oJson["PO"] + "', "                          
-        cQuery += "'" + oJson["Portfolio"] + "', "                           
-        cQuery += "'" + oJson["PO"] + "', "                                      
-        cQuery += ALLTRIM(Str(oJson["CentroCusto"])) + ", " 
+        cQuery += ALLTRIM(Str(oJson["ItemContabil"])) + ", "
+        cQuery += "'" + oJson["NomeItem"] + "', "                        
+        cQuery += "'" + oJson["PO"] + "', "                           
+        cQuery += "'" + oJson["Portfolio"] + "', "                                                 
+        cQuery += ALLTRIM(Str(oJson["CentroCusto"])) + ", "
+        cQuery += "'" + oJson["NomeCC"] + "', " 
+        cQuery += ALLTRIM(Str(oJson["ClasseValor"])) + ", " 
+        cQuery += "'" + oJson["NomeClasse"]  + "', " 
+        cQuery += AllTrim(Str(i)) + ")"
 
-        TCSQLExec(cQuery)
+        aErros := TCSQLExec(cQuery)
 
+        If (aErros < 0)
+            conout("TCSQLError() " + TCSQLError())
+        Endif
+    
     Next
-Return .F.
 
+Return .F.
 
 //--------------------------
 // Apaga registro de importações anteriores.
 //--------------------------
 Static Function TableClean()
     If !lTableCleaned
-        cQuery1 := "DELETE FROM " + RetSqlName("SZ5")"
+        cQuery1 := "DELETE FROM " + RetSqlName("SZ5")
+        
         If TCSQLExec(cQuery1) == 0
             lTableCleaned = .T.  // Marca que a tabela foi limpa
         Else

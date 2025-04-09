@@ -1,5 +1,5 @@
 {
-    "totvsLanguageServer.editor.linter.includes": "W:\\Workspace\\victor.viana\\kttotvs\\INCLUDE;",
+    "totvsLanguageServer.editor.linter.includes": "C:\\repositorio\\ktweb\\kttotvs\\INCLUDE;",
     "totvsLanguageServer.welcomePage": false,
     "advpl.debug_multiThread": true
 }

@@ -20,7 +20,7 @@ User function CADSZ5()
     oBrowse := FWMBrowse():New()
 
     oBrowse:SetAlias("SZ5")
-    oBrowse:SetDescription("SZ5 - Contabilidade Gerencial")
+    oBrowse:SetDescription("SZ5 - Contabilidade Fluxx")
     oBrowse:Activate()
 Return(Nil) 
 
@@ -60,10 +60,6 @@ Static Function ViewDef()
     oStMaster := FWFormStruct(2, 'SZ5')
 
     oView:SetModel(oModel)
-
-    oStMaster:SetProperty("Z5_CC", MVC_VIEW_LOOKUP, {|| cConsulta := "CTT"})
-    oStMaster:SetProperty("Z5_ITEMCON", MVC_VIEW_LOOKUP, {|| cConsulta := "CT1"})
-    oStMaster:SetProperty("Z5_CVALOR", MVC_VIEW_LOOKUP, {|| cConsulta := "CCL"})
 
     oView:AddField("ViewSZ5", oStMaster, "ModelSZ5")
    

@@ -174,7 +174,6 @@ Static Function ProcessarDados(oContainer, aOpcoes)
     FinalizaImport(oExcel, nLin, @aLista)
 Return aLista
 
-
 //----------------------------------------
 // Verificar se a importao deve ser concluda
 //----------------------------------------

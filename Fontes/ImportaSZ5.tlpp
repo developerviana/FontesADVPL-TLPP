@@ -136,9 +136,9 @@ Static Function ProcessarDados(oContainer, aOpcoes)
     oExcel:OpenRead(cPlanilha)
     oExcel:SetPlanAt(oCombo1:nAt)
 
-    cBaseRequest := oExcel:GetValue(3, 1)
-    If Empty(cBaseRequest)
-        FWAlertInfo("Planilha Vazia!", "Atenção")
+    cBaseRequest := oExcel:GetValue(2, 1)
+    If Alltrim(cBaseRequest) != "Base Request"
+        FWAlertAlert("Colunas de importação não encontradas!", "Atenção")
         Return
     EndIf    
 
@@ -151,8 +151,8 @@ Static Function ProcessarDados(oContainer, aOpcoes)
         oJson["BaseRequest"]     := oExcel:GetValue(nLin, 1)                           // A
         oJson["Natureza"]        := oExcel:GetValue(nLin, 2)                           // B
         oJson["Ano"]             := oExcel:GetValue(nLin, 3)                           // C
-        oJson["Status"]          := Left(oExcel:GetValue(nLin, 4), 33)                // D
-        oJson["NomeStatus"]      := Left(oExcel:GetValue(nLin, 5), 33)                // E
+        oJson["Status"]          := Left(oExcel:GetValue(nLin, 4), 33)                 // D
+        oJson["NomeStatus"]      := Left(oExcel:GetValue(nLin, 5), 33)                 // E
         oJson["ValorFinanciado"] := oExcel:GetValue(nLin, 6)                           // F
         oJson["Historico"]       := Left(oExcel:GetValue(nLin, 7), 33)                // G
         oJson["FonteRecurso"]    := Left(oExcel:GetValue(nLin, 8), 33)                // H
@@ -165,15 +165,13 @@ Static Function ProcessarDados(oContainer, aOpcoes)
         oJson["ClasseValor"]     := oExcel:GetValue(nLin, 15)                          // O
         oJson["NomeClasse"]      := Left(oExcel:GetValue(nLin, 16), 33)               // P
 
-
         oJson["LINHA"] := nLin
 
         AAdd(aLista, oJson) 
-    
+
     Next
 
     FinalizaImport(oExcel, nLin, @aLista)
-
 Return aLista
 
 
@@ -182,12 +180,10 @@ Return aLista
 //----------------------------------------
 Static Function FinalizaImport(oExcel, nLin, aLista)
 
-    Local cQuery  := ""
     Local oJson 
     Local LinTam
     Local i      := 0 
-    Local aErros 
-
+    
     LinTam := Len(aLista)
     TableClean()
 
@@ -195,33 +191,41 @@ Static Function FinalizaImport(oExcel, nLin, aLista)
 
         oJson := aLista[i]
 
-        cQuery := "INSERT INTO " + RetSqlName("SZ5") + " ("
-        cQuery += "Z5_ANO, Z5_STATUS, Z5_NSTATUS, Z5_AMOUNTI, Z5_HISTORI, Z5_FRECURS, Z5_ITEMCON, Z5_NOMEITE, Z5_PO, Z5_PORTFOL, Z5_CC, Z5_NOMECC, Z5_CVALOR, Z5_NOMECLA, R_E_C_N_O_) "
-        cQuery += "VALUES ('" +  oJson["Ano"]  + "', "                                        
-        cQuery += "'" + oJson["Status"] + "', "               
-        cQuery += "'" + oJson["NomeStatus"] + "', "     
-        cQuery += ALLTRIM(Str(oJson["ValorFinanciado"])) + ", "   
-        cQuery += "'" + oJson["Historico"] + "', "                                      
-        cQuery += "'" + oJson["FonteRecurso"] + "', "                                
-        cQuery += ALLTRIM(Str(oJson["ItemContabil"])) + ", "
-        cQuery += "'" + oJson["NomeItem"] + "', "                        
-        cQuery += "'" + oJson["PO"] + "', "                           
-        cQuery += "'" + oJson["Portfolio"] + "', "                                                 
-        cQuery += ALLTRIM(Str(oJson["CentroCusto"])) + ", "
-        cQuery += "'" + oJson["NomeCC"] + "', " 
-        cQuery += ALLTRIM(Str(oJson["ClasseValor"])) + ", " 
-        cQuery += "'" + oJson["NomeClasse"]  + "', " 
-        cQuery += AllTrim(Str(i)) + ")"
+        If Select("SZ5") == 0
+            DbUseArea(.T., "TOPCONN", RetSqlName("SZ5"), "SZ5", .F., .T.)
+        EndIf
+        
+        NormalizaCampos(oJson)
 
-        aErros := TCSQLExec(cQuery)
+        If RecLock("SZ5", .T.)
 
-        If (aErros < 0)
-            conout("TCSQLError() " + TCSQLError())
-        Endif
-    
+            //SZ5->Z5_FILIAL     := xFilial("SZ5")
+            SZ5->Z5_BASEREQ    := oJson["BaseRequest"]
+            SZ5->Z5_ANO        := oJson["Ano"]
+            SZ5->Z5_STATUS     := oJson["Status"]
+            SZ5->Z5_NSTATUS    := oJson["NomeStatus"]
+            SZ5->Z5_AMOUNTI    := oJson["ValorFinanciado"]
+            SZ5->Z5_HISTORI    := oJson["Historico"]
+            SZ5->Z5_FRECURS    := oJson["FonteRecurso"]
+            SZ5->Z5_ITEMCON    := oJson["ItemContabil"]
+            SZ5->Z5_NOMEITE    := oJson["NomeItem"]
+            SZ5->Z5_PO         := oJson["PO"]
+            SZ5->Z5_PORTFOL    := oJson["Portfolio"]
+            SZ5->Z5_CC         := oJson["CentroCusto"]
+            SZ5->Z5_NOMECC     := oJson["NomeCC"]
+            SZ5->Z5_CVALOR     := oJson["ClasseValor"]
+            SZ5->Z5_NOMECLA    := oJson["NomeClasse"]
+
+            MsUnlock()
+
+        Else
+            FWAlertError("Erro ao tentar gravar linha " + AllTrim(Str(i)) + "!", "Erro")
+        EndIf
+
     Next
 
-Return .F.
+    FWAlertInfo("Importação Realizada com sucesso!", "Sucesso!")
+Return .T.
 
 //--------------------------
 // Apaga registro de importações anteriores.
@@ -237,3 +241,20 @@ Static Function TableClean()
         Endif
     Endif
 Return
+
+//--------------------------
+// Valtype == C
+//--------------------------
+Static Function NormalizaCampos(oJson)
+
+    Local nI := 0
+    Local aCampos := {"BaseRequest", "Natureza", "Ano", "ItemContabil", "CentroCusto", "ClasseValor"}
+
+    For nI := 1 To Len(aCampos)
+        cCampo := aCampos[nI]
+
+        If ValType(oJson[cCampo]) != "C"
+            oJson[cCampo] := cValToChar(oJson[cCampo])
+        EndIf
+    Next
+Return oJson

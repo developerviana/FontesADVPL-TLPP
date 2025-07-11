@@ -148,22 +148,32 @@ Static Function ProcessarDados(oContainer, aOpcoes)
 
         oJson := JsonObject():New()
 
-        oJson["BaseRequest"]     := oExcel:GetValue(nLin, 1)                           // A
-        oJson["Natureza"]        := oExcel:GetValue(nLin, 2)                           // B
-        oJson["Ano"]             := oExcel:GetValue(nLin, 3)                           // C
-        oJson["Status"]          := Left(oExcel:GetValue(nLin, 4), 33)                 // D
-        oJson["NomeStatus"]      := Left(oExcel:GetValue(nLin, 5), 33)                 // E
-        oJson["ValorFinanciado"] := oExcel:GetValue(nLin, 6)                           // F
+        oJson["BaseRequest"]     := oExcel:GetValue(nLin, 1)                          // A
+        oJson["Natureza"]        := oExcel:GetValue(nLin, 2)                          // B
+        oJson["Ano"]             := oExcel:GetValue(nLin, 3)                          // C
+        oJson["Status"]          := Left(oExcel:GetValue(nLin, 4), 33)                // D
+        oJson["NomeStatus"]      := Left(oExcel:GetValue(nLin, 5), 33)                // E
+        oJson["ValorFinanciado"] := oExcel:GetValue(nLin, 6)                          // F
         oJson["Historico"]       := Left(oExcel:GetValue(nLin, 7), 33)                // G
         oJson["FonteRecurso"]    := Left(oExcel:GetValue(nLin, 8), 33)                // H
-        oJson["ItemContabil"]    := oExcel:GetValue(nLin, 9)                           // I
+        oJson["ItemContabil"]    := oExcel:GetValue(nLin, 9)                          // I
         oJson["NomeItem"]        := Left(oExcel:GetValue(nLin, 10), 33)               // J
         oJson["PO"]              := Left(oExcel:GetValue(nLin, 11), 33)               // K
         oJson["Portfolio"]       := Left(oExcel:GetValue(nLin, 12), 33)               // L
-        oJson["CentroCusto"]     := oExcel:GetValue(nLin, 13)                          // M
+        oJson["CentroCusto"]     := oExcel:GetValue(nLin, 13)                         // M
         oJson["NomeCC"]          := Left(oExcel:GetValue(nLin, 14), 33)               // N
-        oJson["ClasseValor"]     := oExcel:GetValue(nLin, 15)                          // O
-        oJson["NomeClasse"]      := Left(oExcel:GetValue(nLin, 16), 33)               // P
+        
+        if ValType(oExcel:GetValue(2, 15)) == "C" .and. oExcel:GetValue(2, 15) == "Classe de Valor" .and.  Empty(oExcel:GetValue(2, 15)) 
+            If Empty(oExcel:GetValue(nLin, 15)) == .F.
+                oJson["ClasseValor"]     := oExcel:GetValue(nLin, 15)                 // O  
+            EndIf
+        Endif
+
+        if ValType(oExcel:GetValue(2, 16)) == "C" .and. !Empty(oExcel:GetValue(2, 16)) .and. oExcel:GetValue(2, 16) == "Nome da Classe"
+            If Empty(oExcel:GetValue(nLin, 16)) == .F.
+                oJson["NomeClasse"]      := Left(oExcel:GetValue(nLin, 16), 33)       // P
+            EndIf
+        Endif
 
         oJson["LINHA"] := nLin
 
@@ -212,8 +222,13 @@ Static Function FinalizaImport(oExcel, nLin, aLista)
             SZ5->Z5_PORTFOL    := oJson["Portfolio"]
             SZ5->Z5_CC         := oJson["CentroCusto"]
             SZ5->Z5_NOMECC     := oJson["NomeCC"]
-            SZ5->Z5_CVALOR     := oJson["ClasseValor"]
-            SZ5->Z5_NOMECLA    := oJson["NomeClasse"]
+            If oJson["ClasseValor"] != Nil
+                SZ5->Z5_CVALOR     := oJson["ClasseValor"]
+            EndIf
+
+            If oJson["NomeClasse"] != Nil
+                SZ5->Z5_NOMECLA    := oJson["NomeClasse"]
+            EndIf
 
             MsUnlock()
 

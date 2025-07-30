@@ -3,19 +3,19 @@
 #INCLUDE 'FWMVCDef.ch'
 
 /*------------------------------------------------------------------------//
-//Programa:	 CADSZ5
+//Programa:	 CTBMVCZ5
 //Autor:	 Victor Lucas
 //Data:		 03/04/2025
 //Descricao: Contabilidade Gerencial.
 //------------------------------------------------------------------------*/
 
-User function CADSZ5()
+User function CTBMVCZ5()
 
     Local oBrowse := Nil
-    Private aRotina := FwLoadMenuDef("CADSZ5")
+    Private aRotina := FwLoadMenuDef("CTBMVCZ5")
 
     DbSelectArea("SZ5")
-    SetFunName("CADSZ5")
+    SetFunName("CTBMVCZ5")
 
     oBrowse := FWMBrowse():New()
 
@@ -28,10 +28,10 @@ Static Function MenuDef()
    
     aRotina := {}
     
-	ADD OPTION aRotina TITLE 'Visualizar' ACTION 'VIEWDEF.CADSZ5' OPERATION 2 ACCESS 0
-    ADD OPTION aRotina TITLE 'Incluir'    ACTION 'VIEWDEF.CADSZ5' OPERATION 3 ACCESS 0
-	ADD OPTION aRotina TITLE 'Alterar'    ACTION 'VIEWDEF.CADSZ5' OPERATION 4 ACCESS 0
-	ADD OPTION aRotina TITLE 'Excluir'    ACTION 'VIEWDEF.CADSZ5' OPERATION 5 ACCESS 0
+	ADD OPTION aRotina TITLE 'Visualizar' ACTION 'VIEWDEF.CTBMVCZ5' OPERATION 2 ACCESS 0
+    ADD OPTION aRotina TITLE 'Incluir'    ACTION 'VIEWDEF.CTBMVCZ5' OPERATION 3 ACCESS 0
+	ADD OPTION aRotina TITLE 'Alterar'    ACTION 'VIEWDEF.CTBMVCZ5' OPERATION 4 ACCESS 0
+	ADD OPTION aRotina TITLE 'Excluir'    ACTION 'VIEWDEF.CTBMVCZ5' OPERATION 5 ACCESS 0
     ADD OPTION aRotina TITLE 'Importação' ACTION 'U_ImportaSZ5'   OPERATION 3 ACCESS 0
     
 Return aRotina

@@ -1,3 +1,0 @@
-user function SIGAFIS()
-    new():SB1TReportsBusinessObject
-return

@@ -38,7 +38,7 @@ User Function IMPORTASZ5()
     oDialog := FWDialogModal():New()
 
     oDialog:SetBackground(.T.)
-    oDialog:SetTitle('Importação de Contabilidade Gerencial')
+    oDialog:SetTitle('Importação Contabilidade FLUXX')
     oDialog:SetSize(200, 280) 
     oDialog:EnableFormBar(.T.)
     oDialog:SetCloseButton(.F.)
@@ -51,7 +51,7 @@ User Function IMPORTASZ5()
     oContainer := TPanel():New( ,,, oDialog:getPanelMain() )
     oContainer:Align := CONTROL_ALIGN_ALLCLIENT
 
-    cTexto := '• Incluir registros de contabilidade.'
+    cTexto := '• Incluir registros FLUXX.'
 
     oSay2 := TSay():New(010,010,{||cTexto},oContainer,,,,,,.T.,,,800,20)
 
@@ -128,21 +128,24 @@ Static Function ProcessarDados(oContainer, aOpcoes)
     Local oExcel      := Nil
     Local nLin        := 0
     Local nTotLin     := 0
+    Local nTotCol     := 0
     Local aLista      := {} 
     Local oJson
-    Local cBaseRequest
+
+    Local aCabecalhos := {}
+    Local nCol        := 1
+    Local lTemBaseRequest 
+    Local lTemNatureza   
+    Local lTemStatus     
+    Local nBlankCount := 0
+    Local cHeader := ""
 
     oExcel := YExcel():New(, cPlanilha)
     oExcel:OpenRead(cPlanilha)
     oExcel:SetPlanAt(oCombo1:nAt)
 
-    cBaseRequest := oExcel:GetValue(2, 1)
-    If Alltrim(cBaseRequest) != "Base Request"
-        FWAlertAlert("Colunas de importação não encontradas!", "Atenção")
-        Return
-    EndIf    
-
     nTotLin := oExcel:LinTam()
+    nTotCol := oExcel:ColTam()
 
     For nLin := 3 To nTotLin[2]
 
@@ -180,6 +183,30 @@ Static Function ProcessarDados(oContainer, aOpcoes)
         AAdd(aLista, oJson) 
 
     Next
+
+    For nCol := 1 To 50
+        cHeader := AllTrim(oExcel:GetValue(2, nCol))
+        If Empty(cHeader)
+            nBlankCount++
+        Else
+            nBlankCount := 0
+        EndIf
+        AAdd(aCabecalhos, cHeader)
+        If nBlankCount == 3
+            ASIZE(aCabecalhos, Len(aCabecalhos)-3)
+            Exit
+        EndIf
+    Next
+
+    lTemBaseRequest := (ASCAN(aCabecalhos, {|c| Upper(c) == "BASE REQUEST"}) > 0)
+    lTemNatureza    := (ASCAN(aCabecalhos, {|c| Upper(c) == "NATUREZA"}) > 0)
+    lTemStatus      := (ASCAN(aCabecalhos, {|c| Upper(c) == "STATUS"}) > 0)
+
+    If !(lTemBaseRequest .and. lTemNatureza .and. lTemStatus)
+        FWAlertError("A planilha deve conter os campos 'Base Request', 'Natureza' e 'Status' no cabeçalho.", "Erro de Cabeçalho")
+        Return {}
+    EndIf
+
 
     FinalizaImport(oExcel, nLin, @aLista)
 Return aLista
@@ -270,5 +297,6 @@ Static Function NormalizaCampos(oJson)
         If ValType(oJson[cCampo]) != "C"
             oJson[cCampo] := cValToChar(oJson[cCampo])
         EndIf
+
     Next
 Return oJson
